@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ru"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leads Dashboard — Goals · n8n → Zoho</title>
+<style>
+:root{--bg:#0b1020;--card:#111a2e;--ink:#e8edf7;--mut:#8ea0c0;--acc:#5b8cff;--line:#22304d;--ok:#16603c;--okink:#5be8a0;--err:#5e2626;--errink:#ff9a9a;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 -apple-system,Segoe UI,Roboto,Arial,sans-serif}
+.wrap{max-width:1280px;margin:0 auto;padding:22px 18px 80px}
+header.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:18px}
+h1{font-size:22px;margin:0}
+.sub{color:var(--mut);font-size:13px}
+nav{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 18px}
+nav button{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:9px 15px;cursor:pointer;font-size:14px}
+nav button.active{background:var(--acc);border-color:var(--acc)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:18px}
+.stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 16px;min-width:120px;flex:1 1 120px;max-width:220px}
+.stat b{font-size:22px;display:block}
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+input,select,textarea{background:#0b1224;color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:9px 11px;font:inherit;width:100%}
+input::placeholder,textarea::placeholder{color:#5f708f}
+.toolbar input{max-width:260px}
+.toolbar select{width:auto;max-width:190px}
+.btn{background:var(--acc);color:#fff;border:none;border-radius:9px;padding:9px 15px;font-size:14px;cursor:pointer;white-space:nowrap}
+.btn:hover{filter:brightness(1.08)}
+.btn:disabled{opacity:.6;cursor:wait}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis}
+th{color:var(--mut);cursor:pointer;user-select:none;position:sticky;top:0;background:var(--card);z-index:1}
+th:hover{color:var(--ink)}
+tbody tr:hover{background:#0e1830}
+.tablewrap{overflow:auto;max-height:62vh;border:1px solid var(--line);border-radius:12px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.grid .full{grid-column:1/-1}
+label.fld{display:block;margin-bottom:10px}
+label.fld span{display:block;color:var(--mut);font-size:12.5px;margin-bottom:4px}
+label.fld span em{color:var(--errink);font-style:normal}
+.msg{padding:10px 14px;border-radius:9px;margin-top:12px;font-size:14px;display:none}
+.msg.ok{background:#0c3320;color:var(--okink);border:1px solid var(--ok);display:block}
+.msg.err{background:#331414;color:var(--errink);border:1px solid var(--err);display:block}
+.note{background:#0e1830;border-left:3px solid var(--acc);padding:10px 14px;border-radius:8px;color:#cdd8ef;font-size:13px;margin-top:10px}
+.muted{color:var(--mut)}
+code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;padding:1px 5px;border-radius:5px;font-size:12.5px}
+.pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;border:1px solid var(--line);background:#0e2233;color:#7fd3ff}
+.stage{display:inline-block;padding:1px 8px;border-radius:12px;font-size:12px;border:1px solid var(--line)}
+@media(max-width:640px){.grid{grid-template-columns:1fr}.toolbar input{max-width:none;flex:1 1 100%}.toolbar select{max-width:none;flex:1 1 45%}}
+</style></head>
+<body><div class="wrap">
+
+<header class="top">
+  <div>
+    <h1>Leads Dashboard</h1>
+    <div class="sub">n8n → Zoho CRM · единая витрина лидов Goals Plastic Surgery</div>
+  </div>
+  <span class="pill" id="modePill">демо-режим</span>
+</header>
+
+<nav>
+  <button data-tab="report" class="active">📊 Отчёт</button>
+  <button data-tab="add">➕ Новый лид</button>
+  <button data-tab="settings">⚙️ Настройки</button>
+</nav>
+
+<!-- ============ REPORT ============ -->
+<section id="tab-report">
+  <div class="stats">
+    <div class="stat"><b id="stTotal">0</b>всего лидов</div>
+    <div class="stat"><b id="stToday">0</b>сегодня</div>
+    <div class="stat"><b id="stShown">0</b>показано</div>
+    <div class="stat"><b id="stUpd">—</b>обновлено</div>
+  </div>
+  <div class="card">
+    <div class="toolbar">
+      <input id="search" placeholder="🔎 Поиск по всем полям…">
+      <select id="fltSource" title="Источник"><option value="">Источник: все</option></select>
+      <select id="fltStage" title="Стадия"><option value="">Стадия: все</option></select>
+      <select id="fltPeriod" title="Период">
+        <option value="">Период: всё время</option>
+        <option value="0">Сегодня</option>
+        <option value="7">7 дней</option>
+        <option value="30">30 дней</option>
+      </select>
+      <button class="btn ghost" onclick="loadReport()">↻ Обновить</button>
+      <button class="btn ghost" onclick="exportCsv()">⬇ CSV</button>
+      <span class="muted" id="reportHint" style="font-size:12.5px"></span>
+    </div>
+    <div class="tablewrap">
+      <table id="tbl"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table>
+    </div>
+    <div class="note" id="reportNote">Показаны демо-данные. Укажи URL webhook отчёта в «Настройках», чтобы тянуть реальные лиды из n8n / Zoho.</div>
+  </div>
+</section>
+
+<!-- ============ ADD LEAD ============ -->
+<section id="tab-add" style="display:none">
+  <div class="card">
+    <h2 style="margin-top:0;font-size:18px">Добавить лид в Zoho</h2>
+    <form id="leadForm" onsubmit="submitLead(event)" novalidate>
+      <div class="grid">
+        <label class="fld"><span>Имя <em>*</em></span><input name="first_name" required placeholder="Ivan"></label>
+        <label class="fld"><span>Фамилия</span><input name="last_name" placeholder="Petrov"></label>
+        <label class="fld"><span>Телефон <em>*</em> <span class="muted">(10 цифр US или +международный)</span></span><input name="phone" required placeholder="(803) 664-1909" inputmode="tel"></label>
+        <label class="fld"><span>Email</span><input name="email" type="email" placeholder="ivan@example.com"></label>
+        <label class="fld"><span>Город</span><input name="city" placeholder="Miami"></label>
+        <label class="fld"><span>ZIP</span><input name="zip" placeholder="33101" inputmode="numeric" maxlength="10"></label>
+        <label class="fld"><span>Удобное время связи</span><input name="contact_time" placeholder="now / tomorrow 3pm / 7/20 11:00am"></label>
+        <label class="fld"><span>Источник</span>
+          <select name="source">
+            <option>Dashboard</option><option>Facebook Form</option><option>Instagram DM</option>
+            <option>Phone call</option><option>Referral</option><option>Walk-in</option><option>Other</option>
+          </select></label>
+        <label class="fld full"><span>Интерес / процедура</span><input name="interest" placeholder="Rhinoplasty / consultation"></label>
+        <label class="fld full"><span>Заметки</span><textarea name="notes" rows="3" placeholder="Любые детали…"></textarea></label>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap">
+        <button class="btn" type="submit" id="leadSubmit">Создать в Zoho</button>
+        <button class="btn ghost" type="reset">Очистить</button>
+        <span class="muted" style="font-size:12.5px">n8n нормализует телефон, найдёт дубли, сделает upsert Contact + Deal и запишет в журнал.</span>
+      </div>
+      <div class="msg" id="leadMsg"></div>
+    </form>
+  </div>
+</section>
+
+<!-- ============ SETTINGS ============ -->
+<section id="tab-settings" style="display:none">
+  <div class="card">
+    <h2 style="margin-top:0;font-size:18px">Подключение к n8n</h2>
+    <label class="fld"><span>Webhook создания лида (POST)</span>
+      <input id="cfgCreate" placeholder="https://dvoskin.app.n8n.cloud/webhook/lead-create"></label>
+    <label class="fld"><span>Webhook отчёта (GET, отдаёт JSON-массив лидов)</span>
+      <input id="cfgReport" placeholder="https://dvoskin.app.n8n.cloud/webhook/leads-list"></label>
+    <label class="fld"><span>Секретный токен (шлётся заголовком <code>x-api-key</code>)</span>
+      <input id="cfgToken" type="password" placeholder="значение DASHBOARD_API_KEY из n8n" autocomplete="off"></label>
+    <label class="fld" style="max-width:220px"><span>Лимит строк отчёта (1–200)</span>
+      <input id="cfgLimit" type="number" min="1" max="200" placeholder="200"></label>
+    <button class="btn" onclick="saveCfg()">Сохранить</button>
+    <span class="muted" id="cfgSaved" style="margin-left:10px;font-size:13px"></span>
+    <div class="note" style="margin-top:16px">
+      Настройки хранятся только в этом браузере (localStorage) и не попадают в репозиторий.
+      Импорт workflow, привязка Zoho/Google Sheets credentials и установка <code>DASHBOARD_API_KEY</code> — см. <code>README.md</code> в репозитории.
+    </div>
+  </div>
+</section>
+
+<script>
+// ---------- config (persisted in localStorage) ----------
+const LS='leadsDashCfg';
+let cfg=JSON.parse(localStorage.getItem(LS)||'{}');
+function saveCfg(){
+  cfg={create:cfgCreate.value.trim(),report:cfgReport.value.trim(),token:cfgToken.value.trim(),limit:cfgLimit.value.trim()};
+  localStorage.setItem(LS,JSON.stringify(cfg));
+  document.getElementById('cfgSaved').textContent='✓ сохранено';
+  setTimeout(()=>document.getElementById('cfgSaved').textContent='',1500);
+  updateMode(); loadReport();
+}
+function fillCfg(){cfgCreate.value=cfg.create||'';cfgReport.value=cfg.report||'';cfgToken.value=cfg.token||'';cfgLimit.value=cfg.limit||'';}
+function updateMode(){
+  const live=cfg.report||cfg.create;
+  const p=document.getElementById('modePill');
+  p.textContent=live?'подключено к n8n':'демо-режим';
+  p.style.background=live?'#0c3320':'#0e2233';
+  p.style.color=live?'#5be8a0':'#7fd3ff';
+}
+function apiHeaders(extra){
+  const h=Object.assign({},extra||{});
+  if(cfg.token) h['x-api-key']=cfg.token;
+  return h;
+}
+
+// ---------- tabs ----------
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  ['report','add','settings'].forEach(t=>document.getElementById('tab-'+t).style.display='none');
+  document.getElementById('tab-'+b.dataset.tab).style.display='';
+});
+
+// ---------- demo data ----------
+const demo=[
+ {added:'2026-07-16 10:12',first_name:'Anna',last_name:'K.',phone:'+13472192727',email:'anna@ex.com',city:'Brooklyn',zip:'11235',source:'Facebook Form',status:'New Deal',deal_stage:'New Deal'},
+ {added:'2026-07-16 09:40',first_name:'Mike',last_name:'R.',phone:'+14044840928',email:'mike@ex.com',city:'Atlanta',zip:'30301',source:'Instagram DM',status:'Call Scheduled',deal_stage:'Call Scheduled'},
+ {added:'2026-07-15 18:05',first_name:'Sara',last_name:'L.',phone:'+12404185699',email:'sara@ex.com',city:'Miami',zip:'33101',source:'Referral',status:'Consultation',deal_stage:'Consultation'},
+];
+let rows=demo.slice();
+let sortKey=null,sortDir=1;
+
+// ---------- helpers ----------
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const COL_ORDER=['added','first_name','last_name','phone','email','city','zip','contact_time','source','status','deal_stage','deal_id'];
+const COL_LABEL={added:'Добавлен',first_name:'Имя',last_name:'Фамилия',phone:'Телефон',email:'Email',city:'Город',zip:'ZIP',contact_time:'Время связи',source:'Источник',status:'Статус',deal_stage:'Стадия',deal_id:'Deal ID'};
+function cols(){
+  const s=new Set(); rows.forEach(r=>Object.keys(r).forEach(k=>s.add(k)));
+  const known=COL_ORDER.filter(k=>s.has(k));
+  const extra=[...s].filter(k=>!COL_ORDER.includes(k));
+  return known.concat(extra);
+}
+function rowDate(r){ return String(r.added||r.date||r.created||''); }
+
+// ---------- report ----------
+async function loadReport(){
+  updateMode();
+  const hint=document.getElementById('reportHint');
+  if(!cfg.report){
+    rows=demo.slice();
+    document.getElementById('reportNote').style.display='';
+    hint.textContent='(демо)';
+    rebuildFilters(); renderTable(); return;
+  }
+  hint.textContent='загрузка…';
+  try{
+    const u=new URL(cfg.report);
+    const lim=parseInt(cfg.limit,10);
+    if(Number.isFinite(lim)&&lim>0) u.searchParams.set('limit',Math.min(lim,200));
+    const r=await fetch(u,{headers:apiHeaders()});
+    let data=null;
+    try{ data=await r.json(); }catch(_){ data=null; }
+    if(!r.ok) throw new Error('HTTP '+r.status+(data&&data.error?' — '+data.error:''));
+    if(!Array.isArray(data)){
+      if(data&&data.error) throw new Error(data.error);
+      data=(data&&(data.leads||data.data||data.rows))||[];
+    }
+    rows=data;
+    document.getElementById('reportNote').style.display='none';
+    hint.textContent='';
+    document.getElementById('stUpd').textContent=new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+  }catch(e){
+    hint.textContent='ошибка: '+e.message+' (проверь URL, токен и CORS)';
+    rows=demo.slice();
+    document.getElementById('reportNote').style.display='';
+  }
+  rebuildFilters(); renderTable();
+}
+function rebuildFilters(){
+  const mk=(id,key,label)=>{
+    const sel=document.getElementById(id);
+    const cur=sel.value;
+    const vals=[...new Set(rows.map(r=>String(r[key]??'').trim()).filter(Boolean))].sort();
+    sel.innerHTML=`<option value="">${label}: все</option>`+vals.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('');
+    if(vals.includes(cur)) sel.value=cur;
+  };
+  mk('fltSource','source','Источник');
+  mk('fltStage','deal_stage','Стадия');
+}
+function filteredRows(){
+  const q=(document.getElementById('search').value||'').toLowerCase();
+  const fs=document.getElementById('fltSource').value;
+  const fg=document.getElementById('fltStage').value;
+  const fp=document.getElementById('fltPeriod').value;
+  let cutoff=null;
+  if(fp!==''){
+    const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-Number(fp));
+    cutoff=d;
+  }
+  return rows.filter(r=>{
+    if(q&&!JSON.stringify(r).toLowerCase().includes(q)) return false;
+    if(fs&&String(r.source??'')!==fs) return false;
+    if(fg&&String(r.deal_stage??'')!==fg) return false;
+    if(cutoff){
+      const dt=new Date(rowDate(r).replace(' ','T'));
+      if(!(dt instanceof Date)||isNaN(dt)||dt<cutoff) return false;
+    }
+    return true;
+  });
+}
+function renderTable(){
+  let data=filteredRows();
+  if(sortKey) data=data.slice().sort((a,b)=>String(a[sortKey]??'').localeCompare(String(b[sortKey]??''),'ru',{numeric:true})*sortDir);
+  const c=cols();
+  document.getElementById('thead').innerHTML=c.map(k=>`<th onclick="setSort('${esc(k)}')">${esc(COL_LABEL[k]||k)}${sortKey===k?(sortDir>0?' ▲':' ▼'):''}</th>`).join('');
+  document.getElementById('tbody').innerHTML=data.map(r=>'<tr>'+c.map(k=>`<td title="${esc(r[k])}">${esc(r[k])}</td>`).join('')+'</tr>').join('')
+    || `<tr><td colspan="${c.length||1}" class="muted" style="padding:20px">Нет данных</td></tr>`;
+  const today=new Date().toISOString().slice(0,10);
+  document.getElementById('stTotal').textContent=rows.length;
+  document.getElementById('stShown').textContent=data.length;
+  document.getElementById('stToday').textContent=rows.filter(r=>rowDate(r).startsWith(today)).length;
+}
+function setSort(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k;sortDir=1;} renderTable(); }
+['search'].forEach(id=>document.getElementById(id).addEventListener('input',renderTable));
+['fltSource','fltStage','fltPeriod'].forEach(id=>document.getElementById(id).addEventListener('change',renderTable));
+function exportCsv(){
+  const c=cols(); const data=filteredRows();
+  const q=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+  const csv=[c.join(',')].concat(data.map(r=>c.map(k=>q(r[k])).join(','))).join('\n');
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}));
+  a.download='leads_'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+}
+
+// ---------- add lead ----------
+function validateLead(fd){
+  if(!fd.first_name.trim()) return 'Укажи имя.';
+  const raw=fd.phone.trim();
+  const digits=raw.replace(/\D/g,'');
+  if(!raw) return 'Укажи телефон.';
+  if(raw.startsWith('+')){ if(digits.length<8) return 'Международный номер слишком короткий.'; }
+  else if(digits.length<10||(digits.length===11&&!digits.startsWith('1'))||digits.length>11) return 'Телефон US: 10 цифр (или 11 с единицей).';
+  if(fd.email&&!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(fd.email.trim())) return 'Email выглядит некорректно.';
+  if(fd.zip&&!/^\d{5}(-\d{4})?$/.test(fd.zip.trim())) return 'ZIP: 5 цифр (например 33101).';
+  return '';
+}
+async function submitLead(e){
+  e.preventDefault();
+  const m=document.getElementById('leadMsg'); m.className='msg'; m.textContent='';
+  const fd=Object.fromEntries(new FormData(e.target).entries());
+  const verr=validateLead(fd);
+  if(verr){ m.className='msg err'; m.textContent=verr; return; }
+  fd.submitted_at=new Date().toISOString(); fd.source_app='dashboard';
+  if(!cfg.create){ m.className='msg err'; m.textContent='Не задан webhook создания лида — открой «Настройки».'; return; }
+  const btn=document.getElementById('leadSubmit'); btn.disabled=true; btn.textContent='Отправка…';
+  try{
+    const r=await fetch(cfg.create,{method:'POST',headers:apiHeaders({'Content-Type':'application/json'}),body:JSON.stringify(fd)});
+    let data=null; try{ data=await r.json(); }catch(_){}
+    if(!r.ok||!data||data.ok!==true) throw new Error((data&&data.error)||('HTTP '+r.status));
+    m.className='msg ok';
+    m.textContent='✓ Лид отправлен в Zoho.'+(data.duplicate?' Найден дубль — сделка обновлена.':' Создана новая сделка.')+(data.id?' Deal ID: '+data.id:'');
+    e.target.reset(); loadReport();
+  }catch(err){ m.className='msg err'; m.textContent='Ошибка отправки: '+err.message+' (проверь URL webhook, токен и CORS).'; }
+  finally{ btn.disabled=false; btn.textContent='Создать в Zoho'; }
+}
+
+// ---------- init ----------
+fillCfg(); updateMode(); loadReport();
+</script>
+</body></html>
