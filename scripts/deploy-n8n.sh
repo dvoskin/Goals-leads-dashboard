@@ -25,6 +25,18 @@ api() { # method path [json-file]
   fi
 }
 
+check_auth() {
+  local resp
+  resp="$(api GET "/workflows?limit=1")"
+  if ! echo "$resp" | jq -e '.data' >/dev/null 2>&1; then
+    echo "✗ n8n API не принял запрос. Ответ:" >&2
+    echo "  $resp" >&2
+    echo "  Проверьте N8N_KEY (Settings → n8n API) и N8N_URL=$N8N_URL" >&2
+    exit 1
+  fi
+  echo "✓ Доступ к n8n API подтверждён ($N8N_URL)"
+}
+
 deploy() { # file
   local file="$1"
   local name payload id
@@ -50,6 +62,7 @@ deploy() { # file
   api POST "/workflows/$id/activate" >/dev/null && echo "  active ✓"
 }
 
+check_auth
 deploy "$DIR/n8n/lead-create.workflow.json"
 deploy "$DIR/n8n/leads-list.workflow.json"
 
