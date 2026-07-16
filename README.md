@@ -27,6 +27,19 @@
 
 ## 1. Импорт workflow в n8n
 
+### Вариант А: автоматически через n8n API
+
+```bash
+export N8N_URL="https://dvoskin.app.n8n.cloud"
+export N8N_KEY="<ключ из n8n: Settings → n8n API>"
+export DASHBOARD_API_KEY="<опционально: секрет для x-api-key>"
+./scripts/deploy-n8n.sh
+```
+
+Скрипт создаст (или обновит по имени) оба workflow, активирует их и попробует завести Variable `DASHBOARD_API_KEY`.
+
+### Вариант Б: вручную
+
 1. n8n → **Workflows → Create Workflow → ⋯ → Import from File**.
 2. Импортируйте `n8n/lead-create.workflow.json`, затем `n8n/leads-list.workflow.json`.
 3. Откройте каждый workflow и проверьте credentials (см. ниже), затем **Activate**.
