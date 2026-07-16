@@ -97,6 +97,17 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
 <!-- ============ ADD LEAD ============ -->
 <section id="tab-add" style="display:none">
   <div class="card">
+    <h2 style="margin-top:0;font-size:18px">⚡ Быстрая вставка — как в Telegram</h2>
+    <label class="fld"><span>Вставьте текст лида в любом виде: анкета Facebook, строки «имя / телефон / ZIP / время» и т.п.</span>
+      <textarea id="pasteText" rows="7" placeholder="Kale Walker&#10;2149180251&#10;75126&#10;call now"></textarea></label>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn" id="pasteSubmit" onclick="submitPaste()">Распарсить и создать в Zoho</button>
+      <button class="btn ghost" onclick="pasteText.value='';pasteMsg.className='msg'">Очистить</button>
+      <span class="muted" style="font-size:12.5px">Текст разберёт тот же AI-парсер, что и в DEAL CREATOR: имя, телефон, ZIP, язык, время звонка.</span>
+    </div>
+    <div class="msg" id="pasteMsg"></div>
+  </div>
+  <div class="card">
     <h2 style="margin-top:0;font-size:18px">Добавить лид в Zoho</h2>
     <form id="leadForm" onsubmit="submitLead(event)" novalidate>
       <div class="grid">
@@ -320,6 +331,27 @@ async function submitLead(e){
     e.target.reset(); loadReport();
   }catch(err){ m.className='msg err'; m.textContent='Ошибка отправки: '+err.message+' (проверь URL webhook, токен и CORS).'; }
   finally{ btn.disabled=false; btn.textContent='Создать в Zoho'; }
+}
+
+// ---------- paste lead (raw text → AI parser in n8n) ----------
+async function submitPaste(){
+  const m=document.getElementById('pasteMsg'); m.className='msg'; m.textContent='';
+  const raw=document.getElementById('pasteText').value.trim();
+  if(!raw){ m.className='msg err'; m.textContent='Вставьте текст лида.'; return; }
+  if(!/\d{7,}/.test(raw.replace(/\D/g,''))){ m.className='msg err'; m.textContent='В тексте не видно телефона — проверьте.'; return; }
+  if(!cfg.create){ m.className='msg err'; m.textContent='Не задан webhook создания лида — открой «Настройки».'; return; }
+  const btn=document.getElementById('pasteSubmit'); btn.disabled=true; btn.textContent='AI разбирает…';
+  try{
+    const body={raw_text:raw,source:'Dashboard Paste',submitted_at:new Date().toISOString(),source_app:'dashboard'};
+    const r=await fetch(cfg.create,{method:'POST',headers:apiHeaders({'Content-Type':'application/json'}),body:JSON.stringify(body)});
+    let data=null; try{ data=await r.json(); }catch(_){}
+    if(!r.ok||!data||data.ok!==true) throw new Error((data&&data.error)||('HTTP '+r.status));
+    m.className='msg ok';
+    m.textContent='✓ Создано: '+(data.name||'—')+' · '+(data.phone||'')+' · '+(data.best_contact_time||'')
+      +(data.duplicate?' · найден дубль, сделка обновлена':'')+(data.id?' · Deal ID: '+data.id:'');
+    document.getElementById('pasteText').value=''; loadReport();
+  }catch(err){ m.className='msg err'; m.textContent='Ошибка: '+err.message+' (проверь URL webhook, токен и CORS).'; }
+  finally{ btn.disabled=false; btn.textContent='Распарсить и создать в Zoho'; }
 }
 
 // ---------- init ----------

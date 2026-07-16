@@ -57,8 +57,16 @@ Workflow уже ссылаются на существующие credentials (т
 |---|---|
 | Все `Zoho: …` HTTP-ноды | **Zoho account** (`zohoOAuth2Api`) |
 | `Sheets: Append Journal` | **Google Sheets account** (`googleSheetsOAuth2Api`) |
+| `AI-Smart Parser` | **OpenAi account** (`openAiApi`) — тот же, что в DEAL CREATOR |
 
 Если после импорта credential не подхватился (другой инстанс n8n) — откройте ноду и выберите его вручную из списка.
+
+### Два режима приёма лида
+
+`POST /webhook/lead-create` принимает:
+
+1. **Структурированную форму** — поля `first_name, last_name, phone, email, city, zip, contact_time, source, interest, notes`.
+2. **Сырой текст** — поле `raw_text` (окно «⚡ Быстрая вставка» на дашборде, работает как вставка в Telegram): текст разбирает клон AI-Smart Parser из DEAL CREATOR (тот же промпт и модель GPT-4.1), дальше лид идёт по общему конвейеру. Исходный текст целиком сохраняется в `Description` сделки/контакта, так что процедура, DOB, рост/вес и пр. не теряются.
 
 ### Поля Zoho, которые пишутся
 
