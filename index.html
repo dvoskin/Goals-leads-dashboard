@@ -110,6 +110,17 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
     <div class="msg" id="lookupMsg"></div>
     <div id="lookupResults" style="margin-top:14px"></div>
   </div>
+  <div class="card">
+    <h2 style="margin-top:0;font-size:18px">📷 Check a lead by photo</h2>
+    <p class="muted" style="margin:0 0 10px;font-size:13px">Upload a photo of the lead's message or form — AI reads it, finds the lead in Zoho and compares the Best Contact Time. If it differs, you can update Zoho in one click.</p>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <label class="btn ghost" style="cursor:pointer">📷 Choose photo<input type="file" id="checkPhoto" accept="image/*" style="display:none" onchange="onCheckPhoto(this)"></label>
+      <img id="checkPhotoPreview" style="display:none;max-height:56px;border-radius:8px;border:1px solid var(--line)">
+      <button class="btn" id="checkBtn" onclick="runPhotoCheck()" disabled>Find in Zoho</button>
+    </div>
+    <div class="msg" id="checkMsg"></div>
+    <div id="checkResults" style="margin-top:14px"></div>
+  </div>
 </section>
 
 <!-- ============ SHEETS ============ -->
@@ -144,9 +155,15 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
     <label class="fld"><span>Paste lead text in any format: Facebook form answers, "name / phone / ZIP / time" lines, etc.</span>
       <textarea id="pasteText" rows="7" placeholder="Kale Walker&#10;2149180251&#10;75126&#10;call now"></textarea></label>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <label class="btn ghost" style="cursor:pointer">📷 Attach photo<input type="file" id="pastePhoto" accept="image/*" style="display:none" onchange="onPastePhoto(this)"></label>
+      <span id="pastePhotoInfo" class="muted" style="font-size:12.5px"></span>
+      <img id="pastePhotoPreview" style="display:none;max-height:56px;border-radius:8px;border:1px solid var(--line)">
+      <button class="btn ghost" id="pastePhotoClear" style="display:none" onclick="clearPastePhoto()">✕ Remove photo</button>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px">
       <button class="btn" id="pasteSubmit" onclick="submitPaste()">Parse &amp; Create in Zoho</button>
-      <button class="btn ghost" onclick="pasteText.value='';pasteMsg.className='msg'">Clear</button>
-      <span class="muted" style="font-size:12.5px">The same AI parser as DEAL CREATOR extracts name, phone, ZIP, language and call time.</span>
+      <button class="btn ghost" onclick="pasteText.value='';pasteMsg.className='msg';clearPastePhoto()">Clear</button>
+      <span class="muted" style="font-size:12.5px">Text and/or a photo (chat screenshot, form, handwritten note) — AI extracts name, phone, ZIP, language and call time.</span>
     </div>
     <div class="msg" id="pasteMsg"></div>
   </div>
@@ -439,6 +456,64 @@ async function runLookup(){
   finally{ btn.disabled=false; btn.textContent='Search Zoho'; }
 }
 
+// ---------- check lead by photo ----------
+let checkPhotoData=null;
+async function onCheckPhoto(inp){
+  const m=document.getElementById('checkMsg'); m.className='msg'; m.textContent='';
+  if(!inp.files||!inp.files[0]) return;
+  try{
+    checkPhotoData=await compressImage(inp.files[0]);
+    const prev=document.getElementById('checkPhotoPreview');
+    prev.src=checkPhotoData.dataUrl; prev.style.display='';
+    document.getElementById('checkBtn').disabled=false;
+  }catch(e){ checkPhotoData=null; m.className='msg err'; m.textContent=e.message; }
+}
+async function runPhotoCheck(){
+  const m=document.getElementById('checkMsg'); m.className='msg'; m.textContent='';
+  const box=document.getElementById('checkResults'); box.innerHTML='';
+  if(!checkPhotoData){ m.className='msg err'; m.textContent='Choose a photo first.'; return; }
+  if(!cfg.create){ m.className='msg err'; m.textContent='Lead creation webhook is not set — open Settings.'; return; }
+  const btn=document.getElementById('checkBtn'); btn.disabled=true; btn.textContent='AI is reading the photo…';
+  try{
+    const body={mode:'check',photo_base64:checkPhotoData.b64,photo_mime:checkPhotoData.mime};
+    const r=await fetch(cfg.create,{method:'POST',headers:apiHeaders({'Content-Type':'application/json'}),body:JSON.stringify(body)});
+    let data=null; try{ data=await r.json(); }catch(_){}
+    if(!r.ok||!data) throw new Error((data&&data.error)||('HTTP '+r.status));
+    if(data.ok===false) throw new Error(data.error||'check failed');
+    const p=data.parsed||{};
+    let html=`<div class="note">Photo parsed: <b>${esc(p.name||'—')}</b> · ${esc(p.phone||'')} · time: <b>${esc(p.contact_time_raw||'—')}</b> → <b>${esc(p.best_contact_time||'')}</b> (${esc(p.timezone||'')})</div>`;
+    if(!data.found){
+      m.className='msg err'; m.textContent='This lead was NOT found in Zoho by phone '+(p.phone||'')+'. You can create it via Quick Paste.';
+      box.innerHTML=html; return;
+    }
+    m.className='msg ok'; m.textContent='Found in Zoho: '+(data.deals||[]).length+' deal(s), '+(data.contacts||[]).length+' contact(s).';
+    (data.bct_matches||[]).forEach(bm=>{
+      if(bm.match){
+        html+=`<div class="msg ok" style="display:block">✓ Best Contact Time matches Zoho for “${esc(bm.deal_name)}”: <b>${esc(bm.zoho_bct||'—')}</b></div>`;
+      }else{
+        html+=`<div class="msg err" style="display:block">✗ Best Contact Time differs for “${esc(bm.deal_name)}” (stage: ${esc(bm.stage)})<br>
+          Zoho: <b>${esc(bm.zoho_bct||'—')}</b> · Photo: <b>${esc(bm.parsed_bct||'—')}</b><br>
+          <button class="btn" style="margin-top:8px" onclick='updateBct("${esc(bm.deal_id)}",${JSON.stringify(p.contact_time_raw||'')},${JSON.stringify(p.timezone||'')},${JSON.stringify(bm.stage||'')},this)'>Set “${esc(bm.parsed_bct)}” in Zoho</button></div>`;
+      }
+    });
+    html+=(data.deals||[]).map(d=>recordCard(d,'deal')).join('')+(data.contacts||[]).map(c=>recordCard(c,'contact')).join('');
+    box.innerHTML=html;
+  }catch(err){ m.className='msg err'; m.textContent='Error: '+err.message; }
+  finally{ btn.disabled=false; btn.textContent='Find in Zoho'; }
+}
+async function updateBct(dealId,contactTime,tz,currentStage,btnEl){
+  if(btnEl){ btnEl.disabled=true; btnEl.textContent='Updating…'; }
+  try{
+    const body={mode:'update_bct',deal_id:dealId,contact_time:contactTime,timezone:tz,current_stage:currentStage};
+    const r=await fetch(cfg.create,{method:'POST',headers:apiHeaders({'Content-Type':'application/json'}),body:JSON.stringify(body)});
+    let data=null; try{ data=await r.json(); }catch(_){}
+    if(!r.ok||!data||data.ok!==true) throw new Error((data&&data.error)||('HTTP '+r.status));
+    if(btnEl){ btnEl.textContent='✓ Updated: '+(data.best_contact_time||''); btnEl.style.background='var(--ok)'; }
+  }catch(err){
+    if(btnEl){ btnEl.disabled=false; btnEl.textContent='Retry — '+err.message; }
+  }
+}
+
 // ---------- Google Sheets reports ----------
 let shRows=[],shSort=null,shDir=1;
 function shCols(){
@@ -502,23 +577,62 @@ function exportSheetCsv(){
   setTimeout(()=>URL.revokeObjectURL(a.href),5000);
 }
 
-// ---------- paste lead (raw text → AI parser in n8n) ----------
+// ---------- photo helpers (client-side compression to ~<1MB) ----------
+function compressImage(file){
+  return new Promise((resolve,reject)=>{
+    const img=new Image();
+    img.onload=()=>{
+      const MAX=1600;
+      let w=img.naturalWidth,h=img.naturalHeight;
+      if(Math.max(w,h)>MAX){ const k=MAX/Math.max(w,h); w=Math.round(w*k); h=Math.round(h*k); }
+      const c=document.createElement('canvas'); c.width=w; c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      const dataUrl=c.toDataURL('image/jpeg',0.85);
+      URL.revokeObjectURL(img.src);
+      resolve({b64:dataUrl.split(',')[1],mime:'image/jpeg',dataUrl});
+    };
+    img.onerror=()=>{ URL.revokeObjectURL(img.src); reject(new Error('Cannot read this image file.')); };
+    img.src=URL.createObjectURL(file);
+  });
+}
+let pastePhotoData=null;
+async function onPastePhoto(inp){
+  const info=document.getElementById('pastePhotoInfo');
+  if(!inp.files||!inp.files[0]) return;
+  try{
+    pastePhotoData=await compressImage(inp.files[0]);
+    const prev=document.getElementById('pastePhotoPreview');
+    prev.src=pastePhotoData.dataUrl; prev.style.display='';
+    document.getElementById('pastePhotoClear').style.display='';
+    info.textContent=Math.round(pastePhotoData.b64.length*0.75/1024)+' KB';
+  }catch(e){ pastePhotoData=null; info.textContent=e.message; }
+}
+function clearPastePhoto(){
+  pastePhotoData=null;
+  const inp=document.getElementById('pastePhoto'); if(inp) inp.value='';
+  document.getElementById('pastePhotoPreview').style.display='none';
+  document.getElementById('pastePhotoClear').style.display='none';
+  document.getElementById('pastePhotoInfo').textContent='';
+}
+
+// ---------- paste lead (raw text and/or photo → AI parser in n8n) ----------
 async function submitPaste(){
   const m=document.getElementById('pasteMsg'); m.className='msg'; m.textContent='';
   const raw=document.getElementById('pasteText').value.trim();
-  if(!raw){ m.className='msg err'; m.textContent='Paste the lead text first.'; return; }
-  if(!/\d{7,}/.test(raw.replace(/\D/g,''))){ m.className='msg err'; m.textContent='No phone number found in the text — please check.'; return; }
+  if(!raw&&!pastePhotoData){ m.className='msg err'; m.textContent='Paste the lead text or attach a photo first.'; return; }
+  if(raw&&!pastePhotoData&&!/\d{7,}/.test(raw.replace(/\D/g,''))){ m.className='msg err'; m.textContent='No phone number found in the text — please check.'; return; }
   if(!cfg.create){ m.className='msg err'; m.textContent='Lead creation webhook is not set — open Settings.'; return; }
   const btn=document.getElementById('pasteSubmit'); btn.disabled=true; btn.textContent='AI is parsing…';
   try{
-    const body={raw_text:raw,source:'Dashboard Paste',submitted_at:new Date().toISOString(),source_app:'dashboard'};
+    const body={raw_text:raw,source:pastePhotoData?'Dashboard Photo':'Dashboard Paste',submitted_at:new Date().toISOString(),source_app:'dashboard'};
+    if(pastePhotoData){ body.photo_base64=pastePhotoData.b64; body.photo_mime=pastePhotoData.mime; }
     const r=await fetch(cfg.create,{method:'POST',headers:apiHeaders({'Content-Type':'application/json'}),body:JSON.stringify(body)});
     let data=null; try{ data=await r.json(); }catch(_){}
     if(!r.ok||!data||data.ok!==true) throw new Error((data&&data.error)||('HTTP '+r.status));
     m.className='msg ok';
     m.textContent='✓ Created: '+(data.name||'—')+' · '+(data.phone||'')+' · '+(data.best_contact_time||'')
       +(data.duplicate?' · duplicate found, deal updated':'')+(data.id?' · Deal ID: '+data.id:'');
-    document.getElementById('pasteText').value=''; loadReport();
+    document.getElementById('pasteText').value=''; clearPastePhoto(); loadReport();
   }catch(err){ m.className='msg err'; m.textContent='Error: '+err.message+' (check webhook URL, token and CORS).'; }
   finally{ btn.disabled=false; btn.textContent='Parse & Create in Zoho'; }
 }

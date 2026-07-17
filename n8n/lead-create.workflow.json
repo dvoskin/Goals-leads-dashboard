@@ -102,6 +102,226 @@
       }
     },
     {
+      "name": "Update BCT?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        340,
+        -60
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "updbct-check-1",
+              "leftValue": "={{ $json.body.mode || '' }}",
+              "rightValue": "update_bct",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "name": "Resolve New BCT",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        540,
+        -320
+      ],
+      "parameters": {
+        "jsCode": "// mode=update_bct: пересчитать Best Contact Time (движок DEAL CREATOR) и собрать патч сделки\nconst body = $json.body || {};\nconst S = v => String(v ?? '').trim();\nconst dealId = S(body.deal_id);\nconst contactTime = S(body.contact_time);\nconst tzLabelIn = S(body.timezone).toUpperCase();\nconst currentStage = S(body.current_stage);\n\nif (!dealId) return [{ json: { valid: false, error: 'deal_id is required' } }];\nif (!contactTime) return [{ json: { valid: false, error: 'contact_time is required' } }];\n\nconst ET_ZONE = 'America/New_York';\nconst TZ_TO_IANA = {\n  ET:'America/New_York', EST:'America/New_York', EDT:'America/New_York',\n  CT:'America/Chicago', CST:'America/Chicago', CDT:'America/Chicago',\n  MT:'America/Denver', MST:'America/Denver', MDT:'America/Denver',\n  PT:'America/Los_Angeles', PST:'America/Los_Angeles', PDT:'America/Los_Angeles',\n  AKT:'America/Anchorage', AKST:'America/Anchorage', AKDT:'America/Anchorage',\n  HT:'Pacific/Honolulu', HST:'Pacific/Honolulu',\n};\nconst TZ_LABEL = {\n  ET:'ET', EST:'ET', EDT:'ET', CT:'CT', CST:'CT', CDT:'CT',\n  MT:'MT', MST:'MT', MDT:'MT', PT:'PT', PST:'PT', PDT:'PT',\n  AKT:'AKT', AKST:'AKT', AKDT:'AKT', HT:'HT', HST:'HT',\n};\nconst OPEN_HOUR = 8, CLOSE_HOUR = 23, CLIENT_MIN_HOUR = 7;\nfunction clockOpenET(et) { const m = et.hour * 60 + et.minute; return m >= OPEN_HOUR * 60 && m <= CLOSE_HOUR * 60; }\nfunction withinBusinessET(et) { if (et.weekday === 7) return false; return clockOpenET(et); }\nfunction isValidSlot(dz) { return withinBusinessET(dz.setZone(ET_ZONE)) && dz.hour >= CLIENT_MIN_HOUR; }\nfunction fmtDZ(dz, label) { return dz.toFormat('LLLL d, h:mma') + ' ' + label; }\nfunction fmtET(et) { return et.toFormat('LLLL d, h:mma') + ' ET'; }\nfunction callNow() { return { isCallNow: true, bestContactTime: 'CALL NOW', callScheduledISO: '', callScheduledPretty: 'CALL NOW', stage: 'New Deal' }; }\nfunction scheduled(dz, et, label) { return { isCallNow: false, bestContactTime: fmtDZ(dz, label), callScheduledISO: et.toISO({ suppressMilliseconds: true }), callScheduledPretty: fmtET(et), stage: 'Call Scheduled' }; }\nfunction resolveFuture(dz, nowET) {\n  const et0 = dz.setZone(ET_ZONE);\n  if (et0 > nowET && isValidSlot(dz)) return { dz, et: et0 };\n  if (clockOpenET(et0) && dz.hour >= CLIENT_MIN_HOUR) {\n    let d = dz;\n    for (let i = 0; i < 16; i++) { d = d.plus({ days: 1 }); const et = d.setZone(ET_ZONE); if (et > nowET && isValidSlot(d)) return { dz: d, et }; }\n  }\n  return null;\n}\nfunction nextAtHour(nowDZ, nowET, hour, label) {\n  let target = nowDZ.set({ hour, minute: 0, second: 0, millisecond: 0 });\n  for (let i = 0; i < 16; i++) {\n    const et = target.setZone(ET_ZONE);\n    if (et > nowET && isValidSlot(target)) return scheduled(target, et, label);\n    target = target.plus({ days: 1 }).set({ hour, minute: 0, second: 0, millisecond: 0 });\n  }\n  return callNow();\n}\nfunction ensureValidNoonAfternoon(target, nowET) {\n  for (let i = 0; i < 16; i++) {\n    const et = target.setZone(ET_ZONE);\n    if (et > nowET && isValidSlot(target)) return { dz: target, et };\n    target = target.plus({ days: 1 }).set({ hour: 12, minute: 0, second: 0, millisecond: 0 });\n  }\n  return { dz: target, et: target.setZone(ET_ZONE) };\n}\nfunction fromNumeric(mo, dy, yr, hour, minute, ampm, zone, nowDZ, nowET) {\n  let year = yr ? (String(yr).length === 2 ? 2000 + Number(yr) : Number(yr)) : nowDZ.year;\n  let hr, mn;\n  if (hour != null) { hr = Number(hour) % 12; if (/p/i.test(ampm)) hr += 12; mn = Number(minute); }\n  else { hr = 10; mn = 0; }\n  let dz = DateTime.fromObject({ year, month: Number(mo), day: Number(dy), hour: hr, minute: mn, second: 0, millisecond: 0 }, { zone });\n  if (!dz.isValid) return null;\n  if (!yr && dz < nowDZ.startOf('day')) dz = dz.plus({ years: 1 });\n  return resolveFuture(dz, nowET);\n}\nfunction resolveBestContactTime(parserLine, tzGeneric, now) {\n  const line = (parserLine || '').trim();\n  const key = (tzGeneric || 'ET').toUpperCase();\n  const label = TZ_LABEL[key] || 'ET';\n  const zone = TZ_TO_IANA[key] || ET_ZONE;\n  const nowET = now.setZone(ET_ZONE);\n  const nowDZ = now.setZone(zone);\n  if (!line || /^CALL NOW$/i.test(line) || /^ANYTIME$/i.test(line)) {\n    if (isValidSlot(nowDZ)) return callNow();\n    return nextAtHour(nowDZ, nowET, 11, label);\n  }\n  if (/^AFTERNOON$/i.test(line)) {\n    const h = nowDZ.hour, m = nowDZ.minute;\n    let target;\n    if (h < 12) target = nowDZ.set({ hour: 12, minute: 0, second: 0, millisecond: 0 });\n    else if (h < 17 || (h === 17 && m <= 45)) target = nowDZ.plus({ minutes: 15 }).set({ second: 0, millisecond: 0 });\n    else target = nowDZ.plus({ days: 1 }).set({ hour: 12, minute: 0, second: 0, millisecond: 0 });\n    const { dz, et } = ensureValidNoonAfternoon(target, nowET);\n    return scheduled(dz, et, label);\n  }\n  if (/^NOON$/i.test(line)) {\n    const h = nowDZ.hour, m = nowDZ.minute;\n    if (h < 12) { const { dz, et } = ensureValidNoonAfternoon(nowDZ.set({ hour: 12, minute: 0, second: 0, millisecond: 0 }), nowET); return scheduled(dz, et, label); }\n    if (h < 14 || (h === 14 && m === 0)) return callNow();\n    const { dz, et } = ensureValidNoonAfternoon(nowDZ.plus({ days: 1 }).set({ hour: 12, minute: 0, second: 0, millisecond: 0 }), nowET);\n    return scheduled(dz, et, label);\n  }\n  const tm = line.match(/^TOMORROW(?:\\s+(.+))?$/i);\n  if (tm) {\n    const spec = (tm[1] || '').trim();\n    const early = nowDZ.hour < 9 || (nowDZ.hour === 9 && nowDZ.minute <= 50);\n    const base = (early ? nowDZ : nowDZ.plus({ days: 1 })).startOf('day');\n    let target;\n    if (!spec) target = base.set({ hour: 10, minute: 0 });\n    else if (/^NOON$/i.test(spec) || /^AFTERNOON$/i.test(spec)) target = base.set({ hour: 12, minute: 0 });\n    else {\n      const cm = spec.match(/^(\\d{1,2}):(\\d{2})\\s*([AaPp][Mm])$/);\n      if (cm) { let hr = Number(cm[1]) % 12; if (/p/i.test(cm[3])) hr += 12; target = base.set({ hour: hr, minute: Number(cm[2]) }); }\n      else target = base.set({ hour: 10, minute: 0 });\n    }\n    let r = resolveFuture(target, nowET);\n    if (!r) r = resolveFuture(base.set({ hour: 10, minute: 0 }), nowET);\n    if (!r) r = resolveFuture(base.plus({ days: 1 }).set({ hour: 10, minute: 0 }), nowET);\n    if (!r) { const fb = base.set({ hour: 10, minute: 0 }); return scheduled(fb, fb.setZone(ET_ZONE), label); }\n    return scheduled(r.dz, r.et, label);\n  }\n  const mt = line.match(/^([A-Za-z]+)\\s+(\\d{1,2})(?:,\\s*(\\d{4}))?,\\s*(\\d{1,2}):(\\d{2})\\s*([AaPp][Mm])\\s+([A-Za-z]+)$/);\n  if (mt) {\n    const [, month, day, yearRaw, hour, minute, ampm] = mt;\n    const year = yearRaw ? Number(yearRaw) : nowDZ.year;\n    let dz = DateTime.fromFormat(`${month} ${day} ${year} ${hour}:${minute} ${ampm.toUpperCase()}`, 'LLLL d yyyy h:mm a', { zone });\n    if (dz.isValid) {\n      if (!yearRaw && dz < nowDZ.startOf('day')) dz = dz.plus({ years: 1 });\n      const r = resolveFuture(dz, nowET);\n      if (!r) return callNow();\n      return scheduled(r.dz, r.et, label);\n    }\n  }\n  const num = line.match(/^(\\d{1,2})[\\/.\\-](\\d{1,2})(?:[\\/.\\-](\\d{2,4}))?,?\\s*(\\d{1,2}):(\\d{2})\\s*([AaPp][Mm])(?:\\s+[A-Za-z]+)?$/);\n  if (num) { const [, mo, dy, yr, hour, minute, ampm] = num; const r = fromNumeric(mo, dy, yr, hour, minute, ampm, zone, nowDZ, nowET); if (r) return scheduled(r.dz, r.et, label); return callNow(); }\n  const numNoTime = line.match(/^(\\d{1,2})[\\/.\\-](\\d{1,2})(?:[\\/.\\-](\\d{2,4}))?(?:\\s+[A-Za-z]+)?$/);\n  if (numNoTime) { const [, mo, dy, yr] = numNoTime; const r = fromNumeric(mo, dy, yr, null, null, null, zone, nowDZ, nowET); if (r) return scheduled(r.dz, r.et, label); return callNow(); }\n  return callNow();\n}\nfunction extractClock(text) {\n  let m;\n  m = text.match(/\\b(\\d{1,2}):(\\d{2})\\s*([ap])\\.?\\s*m?\\.?\\b/i); if (m) return `${Number(m[1])}:${m[2]}${m[3].toUpperCase()}M`;\n  m = text.match(/\\b(\\d{3,4})\\s*([ap])\\.?\\s*m?\\.?\\b/i);          if (m) { const d = m[1]; return `${Number(d.slice(0,-2))}:${d.slice(-2)}${m[2].toUpperCase()}M`; }\n  m = text.match(/\\b(\\d{1,2})\\s*([ap])\\.?\\s*m?\\.?\\b/i);          if (m) return `${Number(m[1])}:00${m[2].toUpperCase()}M`;\n  m = text.match(/\\b(\\d{1,2}):(\\d{2})\\b/);\n  if (m) { const h = Number(m[1]); if (h >= 1 && h <= 7) return `${h}:${m[2]}PM`; if (h >= 8 && h <= 11) return `${h}:${m[2]}AM`; return `${h}:${m[2]}PM`; }\n  return null;\n}\n\n// Таймзона: из body.timezone или из текста времени\nlet resolvedTimezone = TZ_LABEL[tzLabelIn] || '';\nconst rawCT = contactTime;\nif (!resolvedTimezone) {\n  const tzm = rawCT.match(/\\b(EST|EDT|CST|CDT|MST|MDT|PST|PDT|AKST|AKDT|HST|ET|CT|MT|PT|AKT|HT)\\b/i);\n  const wordm = rawCT.match(/\\b(eastern|central|mountain|pacific|alaska|hawaii)\\b/i);\n  const WORD = { eastern:'ET', central:'CT', mountain:'MT', pacific:'PT', alaska:'AKT', hawaii:'HT' };\n  if (tzm) resolvedTimezone = TZ_LABEL[tzm[1].toUpperCase()];\n  else if (wordm) resolvedTimezone = WORD[wordm[1].toLowerCase()];\n  else resolvedTimezone = 'ET';\n}\n\n// parserLine из сырого текста времени\nlet parserLine = '';\nif (/\\b(tomorrow|mañana|manana)\\b/i.test(rawCT)) {\n  const clk = extractClock(rawCT);\n  parserLine = clk ? `TOMORROW ${clk}` : 'TOMORROW';\n} else if (/\\bafternoon\\b/i.test(rawCT)) {\n  parserLine = 'AFTERNOON';\n} else if (/\\bnoon\\b/i.test(rawCT)) {\n  parserLine = 'NOON';\n} else {\n  const saysNow = /\\b(now|asap|right now|immediately|any\\s?time|whenever|all day|ahora|ya|cuando\\s+sea|cuando\\s+quieras|cualquier\\s+hora|no\\s+importa|lo\\s+antes\\s+posible)\\b/i.test(rawCT);\n  if (!saysNow && rawCT) {\n    const clk = extractClock(rawCT);\n    const dm  = rawCT.match(/\\b(\\d{1,2})[\\/.\\-](\\d{1,2})(?:[\\/.\\-](\\d{2,4}))?\\b/);\n    if (dm) {\n      const datePart = `${Number(dm[1])}/${Number(dm[2])}${dm[3] ? '/' + dm[3] : ''}`;\n      parserLine = clk ? `${datePart} ${clk}` : datePart;\n    } else if (clk) {\n      const zoneNow = DateTime.now().setZone(TZ_TO_IANA[resolvedTimezone] || ET_ZONE);\n      parserLine = `${zoneNow.month}/${zoneNow.day} ${clk}`;\n    }\n  }\n}\nconst t = resolveBestContactTime(parserLine, resolvedTimezone, DateTime.now());\n\n// Стадию меняем только если сделка ещё в начальных стадиях (не откатываем Consultation и т.п.)\nconst stageApplied = ['New Deal', 'Call Scheduled', ''].includes(currentStage) ? t.stage : null;\n\nconst dealPatch = {\n  id: dealId,\n  Best_Contact_Time: t.bestContactTime,\n  Contact_Time_Raw: contactTime,\n  Client_Timezone: resolvedTimezone,\n};\nif (t.callScheduledISO) dealPatch.Call_Scheduled_Date_Time = t.callScheduledISO;\nif (stageApplied) dealPatch.Stage = stageApplied;\n\nreturn [{\n  json: {\n    valid: true,\n    dealId,\n    bestContactTime: t.bestContactTime,\n    callScheduledPretty: t.callScheduledPretty,\n    stageApplied,\n    dealPatch,\n    zohoBody: JSON.stringify({ data: [dealPatch] }),\n  },\n}];\n"
+      }
+    },
+    {
+      "name": "BCT Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        720,
+        -320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "bctvalid-check-1",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "name": "Zoho: Update BCT",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        920,
+        -360
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://www.zohoapis.com/crm/v2/Deals/{{ $json.dealId }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "zohoOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.zohoBody }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "zohoOAuth2Api": {
+          "id": "8aqN9treZ1cKRtr2",
+          "name": "Zoho account"
+        }
+      }
+    },
+    {
+      "name": "Respond BCT",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        -360
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify({ ok: true, mode: 'update_bct', deal_id: $('Resolve New BCT').first().json.dealId, best_contact_time: $('Resolve New BCT').first().json.bestContactTime, call_scheduled: $('Resolve New BCT').first().json.callScheduledPretty, stage: $('Resolve New BCT').first().json.stageApplied }) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Photo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        540,
+        -140
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "photo-check-1",
+              "leftValue": "={{ $json.body.photo_base64 || '' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "name": "Build Vision Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        -220
+      ],
+      "parameters": {
+        "jsCode": "// Запрос к OpenAI Vision: распознать данные лида на фото (тот же промпт, что AI-Smart Parser)\nconst SYSTEM_PROMPT = \"You are a strict lead data parser. Extract fields from a messy Telegram message.\\n\\nYou will receive \\\"Current ET\\\" — the current date and time in US Eastern timezone.\\nPass it through exactly as \\\"createdTime\\\" in your output.\\n\\nRULES:\\n\\n1. PHONE (BULLETPROOF):\\n- Remove ALL non-digit characters: dashes, dots, spaces, parentheses, plus signs, letters.\\n- If result is 11 digits starting with \\\"1\\\" → remove leading \\\"1\\\".\\n- Output exactly 10 digits if valid US phone.\\n- If 9 or fewer digits → output as-is.\\n\\n2. NAME:\\n- Extract the most likely real person name.\\n- Remove emojis, titles (Dr, Mr, Ms), Instagram handles.\\n- First Name: first word, capitalized.\\n- Last Name: remaining words. For Hispanic names keep \\\"De La\\\", \\\"Del\\\", \\\"A.\\\" together.\\n- Single word → firstName only, lastName empty.\\n\\n3. ZIPCODE:\\n- Extract 5-digit US ZIP code.\\n- Anything with \\\"/\\\" or \\\"-\\\" or \\\".\\\" between digits is a DATE, NOT a ZIP.\\n- If no ZIP but city name present → output city name.\\n- If nothing → empty string.\\n\\n4. LANGUAGE:\\n- Normalize to: English, Spanish, French, Portuguese, Creole, Chinese, Korean, Russian, Arabic, Italian, German, Turkish, Vietnamese, Tagalog.\\n- Common abbreviations: Eng/En→English, Sp/Esp/Es→Spanish, Fr→French, Pt/Port→Portuguese, Ru→Russian.\\n- If unclear → empty string.\\n\\n5. CONTACT TIME:\\n- Keep original wording as-is. Do NOT convert or calculate.\\n- COMBINE DATE + TIME: the appointment date and the appointment time may appear on SEPARATE lines or in different spots in the message. Merge the date and time that belong to the requested call into ONE value, date first then time, e.g. lines \\\"7:30am\\\" and \\\"7/6\\\" -> \\\"7/6 7:30am\\\". If only a time is present -> output just the time; if only a date is present -> output just the date.\\n- Examples: \\\"Now\\\", \\\"5 PM\\\", \\\"call at 3\\\", \\\"mañana\\\", \\\"después de las 5\\\", \\\"anytime\\\", \\\"tomorrow morning\\\", \\\"11/24 8am\\\"\\n- Fix obvious shorthand: \\\"2p\\\"→\\\"2:00PM\\\", \\\"7a\\\"→\\\"7:00AM\\\", \\\"tmrw\\\"→\\\"tomorrow\\\"\\n- If date is in DD.MM.YY or DD.MM.YYYY format → convert to MM/DD: \\\"8.04.26 at 2.30PM\\\" → \\\"4/8 at 2:30PM\\\"\\n- If date is in DD/MM/YY or DD/MM/YYYY format → convert to MM/DD: \\\"8/04/26 at 2:30PM\\\" → \\\"4/8 at 2:30PM\\\"  \\n- Fix decimal time notation: \\\"2.30PM\\\" → \\\"2:30PM\\\", \\\"10.15AM\\\" → \\\"10:15AM\\\"\\n- Interpret ambiguous dates as DD.MM (day first) when day > 12, otherwise MM/DD (US format)\\n- If not mentioned → empty string.\\n\\n6. SOURCE: Platform like \\\"goalsplasticsurgery_picture_fb\\\", \\\"Facebook\\\", \\\"Instagram\\\". If absent → empty.\\n\\n7. EMAIL: Extract if present. Otherwise empty.\\n\\n8. MANYCHAT ID: Number with 12+ digits that is NOT a phone. Otherwise empty.\\n\\n9. TIMEZONE:\\n- If user provides a timezone abbreviation instead of ZIP: ET, CT, MT, PT, AKT, HT\\n- Also recognize: EST, EDT, CST, CDT, MST, MDT, PST, PDT → normalize to generic: ET, CT, MT, PT\\n- Also recognize: Eastern→ET, Central→CT, Mountain→MT, Pacific→PT, Alaska→AKT, Hawaii→HT\\n- Do NOT confuse with language codes or other abbreviations\\n- A standalone \\\"CT\\\", \\\"ET\\\", \\\"PT\\\", \\\"MT\\\" on its own line (not part of a sentence) = timezone\\n- If ZIP is also present → timezone is empty (ZIP takes priority for timezone resolution)\\n- If no timezone detected → empty string\\n\\nOUTPUT FORMAT (STRICT JSON ONLY — NO OTHER TEXT):\\n{\\\"phone\\\":\\\"string\\\",\\\"fullName\\\":\\\"string\\\",\\\"firstName\\\":\\\"string\\\",\\\"lastName\\\":\\\"string\\\",\\\"Zipcode\\\":\\\"string\\\",\\\"language\\\":\\\"string\\\",\\\"contactTime\\\":\\\"string\\\",\\\"source\\\":\\\"string\\\",\\\"email\\\":\\\"string\\\",\\\"manychatId\\\":\\\"string\\\",\\\"createdTime\\\":\\\"string\\\",\\\"timezone\\\":\\\"string\\\"}\\n\\nEXAMPLES:\\n\\nCurrent ET: 2026-04-03T15:30:00\\nMessage: \\\"4136266413\\\\nSasha Bryan\\\\n01109\\\\nNow\\\"\\nOutput: {\\\"phone\\\":\\\"4136266413\\\",\\\"fullName\\\":\\\"Sasha Bryan\\\",\\\"firstName\\\":\\\"Sasha\\\",\\\"lastName\\\":\\\"Bryan\\\",\\\"Zipcode\\\":\\\"01109\\\",\\\"language\\\":\\\"\\\",\\\"contactTime\\\":\\\"Now\\\",\\\"source\\\":\\\"\\\",\\\"email\\\":\\\"\\\",\\\"manychatId\\\":\\\"\\\",\\\"createdTime\\\":\\\"2026-04-03T15:30:00\\\"}\\n\\nCurrent ET: 2026-04-03T18:00:00\\nMessage: \\\"281 818 2834\\\\nJasmin Flores\\\\n77598\\\\nEng\\\\ncall at 5:50 PM\\\"\\nOutput: {\\\"phone\\\":\\\"2818182834\\\",\\\"fullName\\\":\\\"Jasmin Flores\\\",\\\"firstName\\\":\\\"Jasmin\\\",\\\"lastName\\\":\\\"Flores\\\",\\\"Zipcode\\\":\\\"77598\\\",\\\"language\\\":\\\"English\\\",\\\"contactTime\\\":\\\"call at 5:50 PM\\\",\\\"source\\\":\\\"\\\",\\\"email\\\":\\\"\\\",\\\"manychatId\\\":\\\"\\\",\\\"createdTime\\\":\\\"2026-04-03T18:00:00\\\"}\\n\\nCurrent ET: 2026-04-03T20:00:00\\nMessage: \\\"Norma De La Torre\\\\n(956)460-9750\\\\nEsp\\\\n78577\\\\nhoy\\\"\\nOutput: {\\\"phone\\\":\\\"9564609750\\\",\\\"fullName\\\":\\\"Norma De La Torre\\\",\\\"firstName\\\":\\\"Norma\\\",\\\"lastName\\\":\\\"De La Torre\\\",\\\"Zipcode\\\":\\\"78577\\\",\\\"language\\\":\\\"Spanish\\\",\\\"contactTime\\\":\\\"hoy\\\",\\\"source\\\":\\\"\\\",\\\"email\\\":\\\"\\\",\\\"manychatId\\\":\\\"\\\",\\\"createdTime\\\":\\\"2026-04-03T20:00:00\\\"}\\n\\nCurrent ET: 2026-04-03T21:50:00\\nMessage: \\\"Pikalov Anton\\\\n535345-44-58\\\\n84119\\\\nSp\\\\nCall at 8:30pm\\\"\\nOutput: {\\\"phone\\\":\\\"5353454458\\\",\\\"fullName\\\":\\\"Pikalov Anton\\\",\\\"firstName\\\":\\\"Pikalov\\\",\\\"lastName\\\":\\\"Anton\\\",\\\"Zipcode\\\":\\\"84119\\\",\\\"language\\\":\\\"Spanish\\\",\\\"contactTime\\\":\\\"Call at 8:30pm\\\",\\\"source\\\":\\\"\\\",\\\"email\\\":\\\"\\\",\\\"manychatId\\\":\\\"\\\",\\\"createdTime\\\":\\\"2026-04-03T21:50:00\\\"}\\n\\nCurrent ET: 2026-04-03T14:00:00\\nMessage: \\\"Maria A. Orozco\\\\n6262268115\\\\nSpanish\\\\n33132\\\\nCualquier hora\\\\ngoalsplasticsurgery_picture_fb\\\\n2026-03-31T01:18:00Z\\\\n55870\\\"\\nOutput: {\\\"phone\\\":\\\"6262268115\\\",\\\"fullName\\\":\\\"Maria A. Orozco\\\",\\\"firstName\\\":\\\"Maria\\\",\\\"lastName\\\":\\\"A. Orozco\\\",\\\"Zipcode\\\":\\\"33132\\\",\\\"language\\\":\\\"Spanish\\\",\\\"contactTime\\\":\\\"Cualquier hora\\\",\\\"source\\\":\\\"goalsplasticsurgery_picture_fb\\\",\\\"email\\\":\\\"\\\",\\\"manychatId\\\":\\\"55870\\\",\\\"createdTime\\\":\\\"2026-04-03T14:00:00\\\"}\\n\\nCurrent ET: 2026-04-03T22:00:00\\nMessage: \\\"Tom Test\\\\n876333-43-43\\\\n79706\\\\n8.04.26 at 2.30PM\\\"\\nOutput: {\\\"phone\\\":\\\"8763334343\\\",\\\"fullName\\\":\\\"Tom Test\\\",\\\"firstName\\\":\\\"Tom\\\",\\\"lastName\\\":\\\"Test\\\",\\\"Zipcode\\\":\\\"79706\\\",\\\"language\\\":\\\"\\\",\\\"contactTime\\\":\\\"4/8 at 2:30PM\\\",\\\"source\\\":\\\"\\\",\\\"email\\\":\\\"\\\",\\\"manychatId\\\":\\\"\\\",\\\"createdTime\\\":\\\"2026-04-03T22:00:00\\\"}\\n\\nCurrent ET: 2026-04-03T16:00:00\\nMessage: \\\"John Smith\\\\n8765551234\\\\nCT\\\\ntomorrow at 3pm\\\"\\nOutput: {\\\"phone\\\":\\\"8765551234\\\",\\\"fullName\\\":\\\"John Smith\\\",\\\"firstName\\\":\\\"John\\\",\\\"lastName\\\":\\\"Smith\\\",\\\"Zipcode\\\":\\\"\\\",\\\"language\\\":\\\"\\\",\\\"contactTime\\\":\\\"tomorrow at 3pm\\\",\\\"source\\\":\\\"\\\",\\\"email\\\":\\\"\\\",\\\"manychatId\\\":\\\"\\\",\\\"createdTime\\\":\\\"2026-04-03T16:00:00\\\",\\\"timezone\\\":\\\"CT\\\"}\\n\\nCurrent ET: 2026-07-06T00:30:00\\nMessage: \\\"Belinda Yaaqub\\\\n940-230-8723\\\\n75114\\\\n7:30am\\\\n7/6\\\"\\nOutput: {\\\"phone\\\":\\\"9402308723\\\",\\\"fullName\\\":\\\"Belinda Yaaqub\\\",\\\"firstName\\\":\\\"Belinda\\\",\\\"lastName\\\":\\\"Yaaqub\\\",\\\"Zipcode\\\":\\\"75114\\\",\\\"language\\\":\\\"\\\",\\\"contactTime\\\":\\\"7/6 7:30am\\\",\\\"source\\\":\\\"\\\",\\\"email\\\":\\\"\\\",\\\"manychatId\\\":\\\"\\\",\\\"createdTime\\\":\\\"2026-07-06T00:30:00\\\",\\\"timezone\\\":\\\"\\\"}\";\nconst body = $json.body || {};\nconst mime = String(body.photo_mime || 'image/jpeg');\nconst b64 = String(body.photo_base64 || '').replace(/^data:[^;]+;base64,/, '');\nconst extraText = String(body.raw_text || '').slice(0, 2000);\nconst nowET = DateTime.now().setZone('America/New_York').toFormat(\"yyyy-MM-dd'T'HH:mm:ss\");\n\nconst userContent = [\n  {\n    type: 'text',\n    text: 'Current ET: ' + nowET\n      + '\\nMessage: the lead data is in the attached photo (screenshot of a chat message, form, or handwritten note). Read ALL text on the photo and extract the fields.'\n      + (extraText ? '\\nAdditional text provided with the photo:\\n' + extraText : ''),\n  },\n  { type: 'image_url', image_url: { url: 'data:' + mime + ';base64,' + b64 } },\n];\n\nreturn [{\n  json: {\n    requestBody: {\n      model: 'gpt-4.1',\n      temperature: 0,\n      max_tokens: 600,\n      messages: [\n        { role: 'system', content: SYSTEM_PROMPT },\n        { role: 'user', content: userContent },\n      ],\n    },\n  },\n}];\n"
+      }
+    },
+    {
+      "name": "AI: Vision Parse",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        -220
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.requestBody) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "openAiApi": {
+          "id": "9s8wjgEyfRuL5lae",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "name": "Parse Vision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        -220
+      ],
+      "parameters": {
+        "jsCode": "// Разбор ответа OpenAI Vision -> тело лида для общего конвейера\nconst resp = $input.first().json || {};\nconst raw = (resp.choices && resp.choices[0] && resp.choices[0].message && resp.choices[0].message.content) || '';\nlet parsed;\ntry {\n  const jsonMatch = raw.match(/\\{[\\s\\S]*\\}/);\n  parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(raw.trim());\n} catch (e) {\n  parsed = {\n    phone: \"\", fullName: \"\", firstName: \"\", lastName: \"\",\n    Zipcode: \"\", language: \"\", contactTime: \"\",\n    source: \"\", email: \"\", manychatId: \"\", createdTime: \"\", timezone: \"\"\n  };\n}\nconst stripCtrl = (v) => (typeof v === 'string'\n  ? v.replace(/[\\u0000-\\u001F\\u007F]+/g, ' ').replace(/\\s{2,}/g, ' ').trim()\n  : v);\nfor (const k of Object.keys(parsed)) parsed[k] = stripCtrl(parsed[k]);\n\nconst webhookBody = $('Webhook').first().json.body || {};\n\n// Нормализация телефона из распознанного текста\nconst rawPhone = String(parsed.phone || '');\nlet phoneOut = '';\nif (rawPhone.startsWith('+')) {\n  phoneOut = rawPhone.replace(/[^\\d+]/g, '');\n} else {\n  const digits = rawPhone.replace(/\\D/g, '');\n  if (digits.length === 10) phoneOut = digits;\n  else if (digits.length === 11 && digits.startsWith('1')) phoneOut = digits.slice(1);\n  else phoneOut = digits;\n}\n\nconst zipOrCity = String(parsed.Zipcode || '').trim();\nconst isZip = /^\\d{5}$/.test(zipOrCity);\n\nconst noteParts = ['Parsed from photo'];\nif (webhookBody.raw_text) noteParts.push('Text: ' + stripCtrl(String(webhookBody.raw_text)).slice(0, 800));\nif (raw && !phoneOut) noteParts.push('Vision output: ' + stripCtrl(raw).slice(0, 400));\n\nreturn [{\n  json: {\n    body: {\n      first_name: parsed.firstName || parsed.fullName || '',\n      last_name: parsed.lastName || '',\n      phone: phoneOut,\n      email: parsed.email || '',\n      city: isZip ? '' : zipOrCity,\n      zip: isZip ? zipOrCity : '',\n      contact_time: parsed.contactTime || '',\n      language: parsed.language || '',\n      timezone: parsed.timezone || '',\n      source: webhookBody.source || parsed.source || 'Dashboard Photo',\n      interest: '',\n      notes: noteParts.join('\\n'),\n    },\n  },\n}];\n"
+      }
+    },
+    {
       "name": "Raw Text?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
@@ -193,6 +413,130 @@
       ],
       "parameters": {
         "jsCode": "// ============================================================\n// Dashboard Lead — Validate & Normalize\n// Портировано из DEAL CREATOR / Facebook Form MAIN:\n//  - нормализация телефона до +1XXXXXXXXXX + варианты для поиска дублей\n//  - ZIP -> штат/таймзона (детерминированная таблица вместо AI-ноды)\n//  - разбор \"удобного времени связи\" -> CALL NOW / Call Scheduled\n// ============================================================\nconst body = $json.body || {};\nconst S = v => String(v ?? '').trim();\n\nconst firstName   = S(body.first_name);\nconst lastName    = S(body.last_name);\nconst email       = S(body.email);\nconst city        = S(body.city);\nconst zipRaw      = S(body.zip).replace(/[^\\d]/g, '').slice(0, 5);\nconst contactTime = S(body.contact_time);\nconst source      = S(body.source) || 'Dashboard';\nconst interest    = S(body.interest);\nconst notes       = S(body.notes);\nconst language    = S(body.language);\n\n// --- Валидация обязательных полей ---\nconst rawPhone  = S(body.phone);\nconst rawDigits = rawPhone.replace(/\\D/g, '');\nlet error = '';\nif (!firstName) error = 'first_name is required';\nelse if (!rawPhone) error = 'phone is required';\nelse if (!rawPhone.startsWith('+') && rawDigits.length < 10) error = 'phone must contain at least 10 digits';\nelse if (rawPhone.startsWith('+') && rawDigits.length < 8) error = 'phone looks too short';\nif (error) return [{ json: { valid: false, error } }];\n\n// --- Нормализация телефона (логика DEAL CREATOR) ---\nlet phone = '', phoneNational = '', isInternational = false;\nif (rawPhone.startsWith('+') && !rawPhone.startsWith('+1')) {\n  phone = rawPhone.replace(/[^\\d+]/g, '');\n  isInternational = true;\n} else if (rawDigits.length === 10) {\n  phoneNational = rawDigits; phone = '+1' + phoneNational;\n} else if (rawDigits.length === 11 && rawDigits.startsWith('1')) {\n  phoneNational = rawDigits.slice(1); phone = '+1' + phoneNational;\n} else if (rawDigits.length > 10) {\n  phone = rawPhone.startsWith('+') ? '+' + rawDigits : rawDigits;\n  isInternational = true;\n} else {\n  phone = rawDigits; phoneNational = rawDigits;\n}\nif (!phoneNational) {\n  const d = phone.replace(/\\D/g, '');\n  phoneNational = d.length >= 10 ? d.slice(-10) : d;\n}\nconst phoneSearchVariants = [];\nconst addVariant = v => { v = S(v); if (v && !phoneSearchVariants.includes(v)) phoneSearchVariants.push(v); };\naddVariant(phone);\nif (!isInternational && phoneNational.length === 10) {\n  addVariant(phoneNational);\n  addVariant('1' + phoneNational);\n  addVariant('+1' + phoneNational);\n} else {\n  addVariant(phone.replace(/\\D/g, ''));\n}\nconst phoneSearchRawCriteria = phoneSearchVariants.length === 1\n  ? `(Phone:equals:${phoneSearchVariants[0]})`\n  : `(${phoneSearchVariants.map(v => `(Phone:equals:${v})`).join('or')})`;\nconst phoneSearchCriteria = encodeURIComponent(phoneSearchRawCriteria);\n\n// --- ZIP -> штат / таймзона (3-значный префикс, приближённо) ---\nconst ZIP_RANGES = [\n  [5,5,'NY'],[6,9,'PR'],[10,27,'MA'],[28,29,'RI'],[30,38,'NH'],[39,49,'ME'],[50,59,'VT'],\n  [60,69,'CT'],[70,89,'NJ'],[100,149,'NY'],[150,196,'PA'],[197,199,'DE'],[200,200,'DC'],\n  [201,201,'VA'],[202,205,'DC'],[206,219,'MD'],[220,246,'VA'],[247,268,'WV'],[270,289,'NC'],\n  [290,299,'SC'],[300,319,'GA'],[320,349,'FL'],[350,369,'AL'],[370,385,'TN'],[386,397,'MS'],\n  [398,399,'GA'],[400,427,'KY'],[430,459,'OH'],[460,479,'IN'],[480,499,'MI'],[500,528,'IA'],\n  [530,549,'WI'],[550,567,'MN'],[570,577,'SD'],[580,588,'ND'],[590,599,'MT'],[600,629,'IL'],\n  [630,658,'MO'],[660,679,'KS'],[680,693,'NE'],[700,715,'LA'],[716,729,'AR'],[730,749,'OK'],\n  [750,799,'TX'],[800,816,'CO'],[820,831,'WY'],[832,838,'ID'],[840,847,'UT'],[850,865,'AZ'],\n  [870,884,'NM'],[885,885,'TX'],[889,898,'NV'],[900,961,'CA'],[967,968,'HI'],[970,979,'OR'],\n  [980,994,'WA'],[995,999,'AK'],\n];\nconst STATE_TZ = {\n  ME:'ET',NH:'ET',VT:'ET',MA:'ET',RI:'ET',CT:'ET',NY:'ET',NJ:'ET',PA:'ET',DE:'ET',MD:'ET',DC:'ET',\n  VA:'ET',WV:'ET',NC:'ET',SC:'ET',GA:'ET',FL:'ET',OH:'ET',MI:'ET',IN:'ET',KY:'ET',PR:'ET',\n  WI:'CT',IL:'CT',MN:'CT',IA:'CT',MO:'CT',AR:'CT',LA:'CT',MS:'CT',AL:'CT',TN:'CT',TX:'CT',\n  OK:'CT',KS:'CT',NE:'CT',SD:'CT',ND:'CT',\n  MT:'MT',WY:'MT',CO:'MT',NM:'MT',ID:'MT',UT:'MT',AZ:'MT',\n  CA:'PT',NV:'PT',OR:'PT',WA:'PT', AK:'AKT', HI:'HT',\n};\nlet resolvedState = '';\nif (zipRaw.length === 5) {\n  const p3 = parseInt(zipRaw.slice(0, 3), 10);\n  const hit = ZIP_RANGES.find(([lo, hi]) => p3 >= lo && p3 <= hi);\n  if (hit) resolvedState = hit[2];\n}\nlet resolvedTimezone = STATE_TZ[resolvedState] || 'ET';\nconst resolvedZip = zipRaw.length === 5 ? zipRaw : '';\n\n// ============================================================\n// Best Contact Time — движок из DEAL CREATOR (рабочие часы 8:00–23:00 ET,\n// воскресенье закрыто, \"tomorrow\" никогда не CALL NOW и т.д.)\n// ============================================================\nconst ET_ZONE = 'America/New_York';\nconst TZ_TO_IANA = {\n  ET:'America/New_York', EST:'America/New_York', EDT:'America/New_York',\n  CT:'America/Chicago', CST:'America/Chicago', CDT:'America/Chicago',\n  MT:'America/Denver', MST:'America/Denver', MDT:'America/Denver',\n  PT:'America/Los_Angeles', PST:'America/Los_Angeles', PDT:'America/Los_Angeles',\n  AKT:'America/Anchorage', AKST:'America/Anchorage', AKDT:'America/Anchorage',\n  HT:'Pacific/Honolulu', HST:'Pacific/Honolulu',\n};\nconst TZ_LABEL = {\n  ET:'ET', EST:'ET', EDT:'ET', CT:'CT', CST:'CT', CDT:'CT',\n  MT:'MT', MST:'MT', MDT:'MT', PT:'PT', PST:'PT', PDT:'PT',\n  AKT:'AKT', AKST:'AKT', AKDT:'AKT', HT:'HT', HST:'HT',\n};\nconst OPEN_HOUR = 8, CLOSE_HOUR = 23, CLIENT_MIN_HOUR = 7;\nfunction clockOpenET(et) { const m = et.hour * 60 + et.minute; return m >= OPEN_HOUR * 60 && m <= CLOSE_HOUR * 60; }\nfunction withinBusinessET(et) { if (et.weekday === 7) return false; return clockOpenET(et); }\nfunction isValidSlot(dz) { return withinBusinessET(dz.setZone(ET_ZONE)) && dz.hour >= CLIENT_MIN_HOUR; }\nfunction fmtDZ(dz, label) { return dz.toFormat('LLLL d, h:mma') + ' ' + label; }\nfunction fmtET(et) { return et.toFormat('LLLL d, h:mma') + ' ET'; }\nfunction callNow() { return { isCallNow: true, bestContactTime: 'CALL NOW', callScheduledISO: '', callScheduledPretty: 'CALL NOW', stage: 'New Deal' }; }\nfunction scheduled(dz, et, label) { return { isCallNow: false, bestContactTime: fmtDZ(dz, label), callScheduledISO: et.toISO({ suppressMilliseconds: true }), callScheduledPretty: fmtET(et), stage: 'Call Scheduled' }; }\nfunction resolveFuture(dz, nowET) {\n  const et0 = dz.setZone(ET_ZONE);\n  if (et0 > nowET && isValidSlot(dz)) return { dz, et: et0 };\n  if (clockOpenET(et0) && dz.hour >= CLIENT_MIN_HOUR) {\n    let d = dz;\n    for (let i = 0; i < 16; i++) { d = d.plus({ days: 1 }); const et = d.setZone(ET_ZONE); if (et > nowET && isValidSlot(d)) return { dz: d, et }; }\n  }\n  return null;\n}\nfunction nextAtHour(nowDZ, nowET, hour, label) {\n  let target = nowDZ.set({ hour, minute: 0, second: 0, millisecond: 0 });\n  for (let i = 0; i < 16; i++) {\n    const et = target.setZone(ET_ZONE);\n    if (et > nowET && isValidSlot(target)) return scheduled(target, et, label);\n    target = target.plus({ days: 1 }).set({ hour, minute: 0, second: 0, millisecond: 0 });\n  }\n  return callNow();\n}\nfunction ensureValidNoonAfternoon(target, nowET) {\n  for (let i = 0; i < 16; i++) {\n    const et = target.setZone(ET_ZONE);\n    if (et > nowET && isValidSlot(target)) return { dz: target, et };\n    target = target.plus({ days: 1 }).set({ hour: 12, minute: 0, second: 0, millisecond: 0 });\n  }\n  return { dz: target, et: target.setZone(ET_ZONE) };\n}\nfunction fromNumeric(mo, dy, yr, hour, minute, ampm, zone, nowDZ, nowET) {\n  let year = yr ? (String(yr).length === 2 ? 2000 + Number(yr) : Number(yr)) : nowDZ.year;\n  let hr, mn;\n  if (hour != null) { hr = Number(hour) % 12; if (/p/i.test(ampm)) hr += 12; mn = Number(minute); }\n  else { hr = 10; mn = 0; }\n  let dz = DateTime.fromObject({ year, month: Number(mo), day: Number(dy), hour: hr, minute: mn, second: 0, millisecond: 0 }, { zone });\n  if (!dz.isValid) return null;\n  if (!yr && dz < nowDZ.startOf('day')) dz = dz.plus({ years: 1 });\n  return resolveFuture(dz, nowET);\n}\nfunction resolveBestContactTime(parserLine, tzGeneric, now) {\n  const line = (parserLine || '').trim();\n  const key = (tzGeneric || 'ET').toUpperCase();\n  const label = TZ_LABEL[key] || 'ET';\n  const zone = TZ_TO_IANA[key] || ET_ZONE;\n  const nowET = now.setZone(ET_ZONE);\n  const nowDZ = now.setZone(zone);\n  if (!line || /^CALL NOW$/i.test(line) || /^ANYTIME$/i.test(line)) {\n    if (isValidSlot(nowDZ)) return callNow();\n    return nextAtHour(nowDZ, nowET, 11, label);\n  }\n  if (/^AFTERNOON$/i.test(line)) {\n    const h = nowDZ.hour, m = nowDZ.minute;\n    let target;\n    if (h < 12) target = nowDZ.set({ hour: 12, minute: 0, second: 0, millisecond: 0 });\n    else if (h < 17 || (h === 17 && m <= 45)) target = nowDZ.plus({ minutes: 15 }).set({ second: 0, millisecond: 0 });\n    else target = nowDZ.plus({ days: 1 }).set({ hour: 12, minute: 0, second: 0, millisecond: 0 });\n    const { dz, et } = ensureValidNoonAfternoon(target, nowET);\n    return scheduled(dz, et, label);\n  }\n  if (/^NOON$/i.test(line)) {\n    const h = nowDZ.hour, m = nowDZ.minute;\n    if (h < 12) { const { dz, et } = ensureValidNoonAfternoon(nowDZ.set({ hour: 12, minute: 0, second: 0, millisecond: 0 }), nowET); return scheduled(dz, et, label); }\n    if (h < 14 || (h === 14 && m === 0)) return callNow();\n    const { dz, et } = ensureValidNoonAfternoon(nowDZ.plus({ days: 1 }).set({ hour: 12, minute: 0, second: 0, millisecond: 0 }), nowET);\n    return scheduled(dz, et, label);\n  }\n  const tm = line.match(/^TOMORROW(?:\\s+(.+))?$/i);\n  if (tm) {\n    const spec = (tm[1] || '').trim();\n    const early = nowDZ.hour < 9 || (nowDZ.hour === 9 && nowDZ.minute <= 50);\n    const base = (early ? nowDZ : nowDZ.plus({ days: 1 })).startOf('day');\n    let target;\n    if (!spec) target = base.set({ hour: 10, minute: 0 });\n    else if (/^NOON$/i.test(spec) || /^AFTERNOON$/i.test(spec)) target = base.set({ hour: 12, minute: 0 });\n    else {\n      const cm = spec.match(/^(\\d{1,2}):(\\d{2})\\s*([AaPp][Mm])$/);\n      if (cm) { let hr = Number(cm[1]) % 12; if (/p/i.test(cm[3])) hr += 12; target = base.set({ hour: hr, minute: Number(cm[2]) }); }\n      else target = base.set({ hour: 10, minute: 0 });\n    }\n    let r = resolveFuture(target, nowET);\n    if (!r) r = resolveFuture(base.set({ hour: 10, minute: 0 }), nowET);\n    if (!r) r = resolveFuture(base.plus({ days: 1 }).set({ hour: 10, minute: 0 }), nowET);\n    if (!r) { const fb = base.set({ hour: 10, minute: 0 }); return scheduled(fb, fb.setZone(ET_ZONE), label); }\n    return scheduled(r.dz, r.et, label);\n  }\n  const mt = line.match(/^([A-Za-z]+)\\s+(\\d{1,2})(?:,\\s*(\\d{4}))?,\\s*(\\d{1,2}):(\\d{2})\\s*([AaPp][Mm])\\s+([A-Za-z]+)$/);\n  if (mt) {\n    const [, month, day, yearRaw, hour, minute, ampm] = mt;\n    const year = yearRaw ? Number(yearRaw) : nowDZ.year;\n    let dz = DateTime.fromFormat(`${month} ${day} ${year} ${hour}:${minute} ${ampm.toUpperCase()}`, 'LLLL d yyyy h:mm a', { zone });\n    if (dz.isValid) {\n      if (!yearRaw && dz < nowDZ.startOf('day')) dz = dz.plus({ years: 1 });\n      const r = resolveFuture(dz, nowET);\n      if (!r) return callNow();\n      return scheduled(r.dz, r.et, label);\n    }\n  }\n  const num = line.match(/^(\\d{1,2})[\\/.\\-](\\d{1,2})(?:[\\/.\\-](\\d{2,4}))?,?\\s*(\\d{1,2}):(\\d{2})\\s*([AaPp][Mm])(?:\\s+[A-Za-z]+)?$/);\n  if (num) { const [, mo, dy, yr, hour, minute, ampm] = num; const r = fromNumeric(mo, dy, yr, hour, minute, ampm, zone, nowDZ, nowET); if (r) return scheduled(r.dz, r.et, label); return callNow(); }\n  const numNoTime = line.match(/^(\\d{1,2})[\\/.\\-](\\d{1,2})(?:[\\/.\\-](\\d{2,4}))?(?:\\s+[A-Za-z]+)?$/);\n  if (numNoTime) { const [, mo, dy, yr] = numNoTime; const r = fromNumeric(mo, dy, yr, null, null, null, zone, nowDZ, nowET); if (r) return scheduled(r.dz, r.et, label); return callNow(); }\n  return callNow();\n}\nfunction extractClock(text) {\n  let m;\n  m = text.match(/\\b(\\d{1,2}):(\\d{2})\\s*([ap])\\.?\\s*m?\\.?\\b/i); if (m) return `${Number(m[1])}:${m[2]}${m[3].toUpperCase()}M`;\n  m = text.match(/\\b(\\d{3,4})\\s*([ap])\\.?\\s*m?\\.?\\b/i);          if (m) { const d = m[1]; return `${Number(d.slice(0,-2))}:${d.slice(-2)}${m[2].toUpperCase()}M`; }\n  m = text.match(/\\b(\\d{1,2})\\s*([ap])\\.?\\s*m?\\.?\\b/i);          if (m) return `${Number(m[1])}:00${m[2].toUpperCase()}M`;\n  // Голое \"4:00\" без am/pm: 1-7 считаем PM, 8-11 — AM (как трактует команда в Telegram)\n  m = text.match(/\\b(\\d{1,2}):(\\d{2})\\b/);\n  if (m) { const h = Number(m[1]); if (h >= 1 && h <= 7) return `${h}:${m[2]}PM`; if (h >= 8 && h <= 11) return `${h}:${m[2]}AM`; return `${h}:${m[2]}PM`; }\n  return null;\n}\n\n// Явная таймзона из тела запроса (например, AI-парсер нашёл \"CT\" отдельной строкой)\nconst tzOverride = S(body.timezone).toUpperCase();\nif (!resolvedZip && tzOverride && TZ_LABEL[tzOverride]) resolvedTimezone = TZ_LABEL[tzOverride];\n\n// Если ZIP не дал таймзону, но клиент явно указал её в тексте времени\nconst rawCT = contactTime;\nif (!resolvedZip && rawCT) {\n  const tzm = rawCT.match(/\\b(EST|EDT|CST|CDT|MST|MDT|PST|PDT|AKST|AKDT|HST|ET|CT|MT|PT|AKT|HT)\\b/i);\n  const wordm = rawCT.match(/\\b(eastern|central|mountain|pacific|alaska|hawaii)\\b/i);\n  const WORD = { eastern:'ET', central:'CT', mountain:'MT', pacific:'PT', alaska:'AKT', hawaii:'HT' };\n  if (tzm) resolvedTimezone = TZ_LABEL[tzm[1].toUpperCase()] || resolvedTimezone;\n  else if (wordm) resolvedTimezone = WORD[wordm[1].toLowerCase()];\n}\n\n// Формируем parserLine из сырого текста формы (вместо AI-парсера)\nlet parserLine = '';\nif (/\\b(tomorrow|mañana|manana)\\b/i.test(rawCT)) {\n  const clk = extractClock(rawCT);\n  parserLine = clk ? `TOMORROW ${clk}` : 'TOMORROW';\n} else if (/\\bafternoon\\b/i.test(rawCT)) {\n  parserLine = 'AFTERNOON';\n} else if (/\\bnoon\\b/i.test(rawCT)) {\n  parserLine = 'NOON';\n} else if (rawCT) {\n  const saysNow = /\\b(now|asap|right now|immediately|any\\s?time|whenever|all day|ahora|ya|cuando\\s+sea|cuando\\s+quieras|cualquier\\s+hora|no\\s+importa|lo\\s+antes\\s+posible)\\b/i.test(rawCT);\n  if (!saysNow) {\n    const clk = extractClock(rawCT);\n    const dm  = rawCT.match(/\\b(\\d{1,2})[\\/.\\-](\\d{1,2})(?:[\\/.\\-](\\d{2,4}))?\\b/);\n    if (dm) {\n      const datePart = `${Number(dm[1])}/${Number(dm[2])}${dm[3] ? '/' + dm[3] : ''}`;\n      parserLine = clk ? `${datePart} ${clk}` : datePart;\n    } else if (clk) {\n      const zoneNow = DateTime.now().setZone(TZ_TO_IANA[(resolvedTimezone || 'ET').toUpperCase()] || ET_ZONE);\n      parserLine = `${zoneNow.month}/${zoneNow.day} ${clk}`;\n    }\n  }\n}\nconst t = resolveBestContactTime(parserLine, resolvedTimezone, DateTime.now());\n\nreturn [{\n  json: {\n    valid: true,\n    firstName, lastName,\n    fullName: (firstName + ' ' + lastName).trim(),\n    phone, phoneForCall: phone, phoneLast10: phoneNational,\n    phoneSearchVariants, phoneSearchRawCriteria, phoneSearchCriteria,\n    isInternational,\n    email, city,\n    resolvedZip,\n    resolvedCity: city || resolvedState,\n    resolvedState, resolvedTimezone,\n    contactTime,\n    bestContactTime: t.bestContactTime,\n    callScheduledISO: t.callScheduledISO,\n    callScheduledPretty: t.callScheduledPretty,\n    stage: t.stage,\n    source, interest, notes, language,\n    submittedAt: DateTime.now().setZone(ET_ZONE).toFormat('yyyy-MM-dd HH:mm'),\n  },\n}];\n"
+      }
+    },
+    {
+      "name": "Check Mode?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        760,
+        -140
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "checkmode-check-1",
+              "leftValue": "={{ $('Webhook').item.json.body.mode || '' }}",
+              "rightValue": "check",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "name": "Zoho: Check Deals",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        -260
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "url": "=https://www.zohoapis.com/crm/v2/Deals/search?criteria={{ $('Validate & Normalize').item.json.phoneSearchCriteria }}&sort_by=Created_Time&sort_order=desc",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "zohoOAuth2Api",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "zohoOAuth2Api": {
+          "id": "8aqN9treZ1cKRtr2",
+          "name": "Zoho account"
+        }
+      }
+    },
+    {
+      "name": "Zoho: Check Contacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1160,
+        -260
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "url": "=https://www.zohoapis.com/crm/v2/Contacts/search?criteria={{ $('Validate & Normalize').item.json.phoneSearchCriteria }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "zohoOAuth2Api",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "zohoOAuth2Api": {
+          "id": "8aqN9treZ1cKRtr2",
+          "name": "Zoho account"
+        }
+      }
+    },
+    {
+      "name": "Build Check Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        -260
+      ],
+      "parameters": {
+        "jsCode": "// Режим \"check\": найденные в Zoho сделки/контакты + сравнение Best Contact Time\nconst dealsResp = $('Zoho: Check Deals').first().json || {};\nconst contactsResp = $input.first().json || {};\nconst v = $('Validate & Normalize').first().json;\n\nconst clean = (rec) => {\n  const out = {};\n  for (const [k, val] of Object.entries(rec)) {\n    if (k.startsWith('$')) continue;\n    if (val === null || val === undefined || val === '') continue;\n    if (Array.isArray(val)) {\n      if (val.length) out[k] = val.map(x => (x && (x.name || x.id)) || x).join(', ');\n    } else if (typeof val === 'object') {\n      if (val.name) out[k] = val.name;\n      else if (val.id) out[k] = val.id;\n    } else {\n      out[k] = val;\n    }\n  }\n  return out;\n};\nconst deals = (Array.isArray(dealsResp.data) ? dealsResp.data : []).map(clean);\nconst contacts = (Array.isArray(contactsResp.data) ? contactsResp.data : []).map(clean);\n\nconst norm = s => String(s || '').replace(/\\s+/g, ' ').trim().toLowerCase();\nconst bct_matches = deals.map(d => ({\n  deal_id: d.id || '',\n  deal_name: d.Deal_Name || '',\n  stage: d.Stage || '',\n  zoho_bct: d.Best_Contact_Time || '',\n  parsed_bct: v.bestContactTime || '',\n  match: norm(d.Best_Contact_Time) === norm(v.bestContactTime),\n}));\n\nreturn [{\n  json: {\n    ok: true,\n    mode: 'check',\n    found: deals.length > 0 || contacts.length > 0,\n    parsed: {\n      name: v.fullName || '',\n      phone: v.phone || '',\n      contact_time_raw: v.contactTime || '',\n      best_contact_time: v.bestContactTime || '',\n      timezone: v.resolvedTimezone || '',\n      zip: v.resolvedZip || '',\n      stage: v.stage || '',\n    },\n    deals,\n    contacts,\n    bct_matches,\n  },\n}];\n"
+      }
+    },
+    {
+      "name": "Respond Check",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1560,
+        -260
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
       }
     },
     {
@@ -507,7 +851,7 @@
       "main": [
         [
           {
-            "node": "Raw Text?",
+            "node": "Update BCT?",
             "type": "main",
             "index": 0
           }
@@ -515,6 +859,115 @@
         [
           {
             "node": "Respond 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update BCT?": {
+      "main": [
+        [
+          {
+            "node": "Resolve New BCT",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Photo?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve New BCT": {
+      "main": [
+        [
+          {
+            "node": "BCT Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BCT Valid?": {
+      "main": [
+        [
+          {
+            "node": "Zoho: Update BCT",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoho: Update BCT": {
+      "main": [
+        [
+          {
+            "node": "Respond BCT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Photo?": {
+      "main": [
+        [
+          {
+            "node": "Build Vision Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Raw Text?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Vision Request": {
+      "main": [
+        [
+          {
+            "node": "AI: Vision Parse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: Vision Parse": {
+      "main": [
+        [
+          {
+            "node": "Parse Vision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Vision": {
+      "main": [
+        [
+          {
+            "node": "Validate & Normalize",
             "type": "main",
             "index": 0
           }
@@ -576,7 +1029,7 @@
       "main": [
         [
           {
-            "node": "Zoho: Search Contact",
+            "node": "Check Mode?",
             "type": "main",
             "index": 0
           }
@@ -584,6 +1037,57 @@
         [
           {
             "node": "Respond 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Mode?": {
+      "main": [
+        [
+          {
+            "node": "Zoho: Check Deals",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Zoho: Search Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoho: Check Deals": {
+      "main": [
+        [
+          {
+            "node": "Zoho: Check Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoho: Check Contacts": {
+      "main": [
+        [
+          {
+            "node": "Build Check Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Check Report": {
+      "main": [
+        [
+          {
+            "node": "Respond Check",
             "type": "main",
             "index": 0
           }

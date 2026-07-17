@@ -61,12 +61,15 @@ Workflow уже ссылаются на существующие credentials (т
 
 Если после импорта credential не подхватился (другой инстанс n8n) — откройте ноду и выберите его вручную из списка.
 
-### Два режима приёма лида
+### Режимы приёма лида
 
 `POST /webhook/lead-create` принимает:
 
 1. **Структурированную форму** — поля `first_name, last_name, phone, email, city, zip, contact_time, source, interest, notes`.
-2. **Сырой текст** — поле `raw_text` (окно «⚡ Быстрая вставка» на дашборде, работает как вставка в Telegram): текст разбирает клон AI-Smart Parser из DEAL CREATOR (тот же промпт и модель GPT-4.1), дальше лид идёт по общему конвейеру. Исходный текст целиком сохраняется в `Description` сделки/контакта, так что процедура, DOB, рост/вес и пр. не теряются.
+2. **Сырой текст** — поле `raw_text` (окно «⚡ Quick Paste», работает как вставка в Telegram): текст разбирает клон AI-Smart Parser из DEAL CREATOR (тот же промпт и модель GPT-4.1), дальше лид идёт по общему конвейеру. Исходный текст целиком сохраняется в `Description`.
+3. **Фото** — поля `photo_base64` + `photo_mime` (кнопка «📷 Attach photo» в Quick Paste): скриншот переписки, анкета или рукописная заметка распознаётся OpenAI Vision (gpt-4.1, тот же промпт) и создаёт лид. Дашборд сжимает фото на клиенте до ~1600px/JPEG.
+4. **Проверка по фото** — `mode: "check"` + фото: распознаёт лида, ищет его в Zoho по вариантам телефона и возвращает `{parsed, deals, contacts, bct_matches}` — полные карточки и сравнение Best Contact Time (вкладка Lookup → «Check a lead by photo»). Ничего не создаёт.
+5. **Обновление времени** — `mode: "update_bct"` + `deal_id, contact_time, timezone, current_stage`: пересчитывает Best Contact Time движком DEAL CREATOR и обновляет сделку (`Best_Contact_Time`, `Call_Scheduled_Date_Time`, `Contact_Time_Raw`; `Stage` меняется только если сделка ещё в New Deal / Call Scheduled — поздние стадии не откатываются).
 
 ### Поля Zoho, которые пишутся
 
