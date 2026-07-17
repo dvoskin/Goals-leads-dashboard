@@ -14,12 +14,12 @@
       "typeVersion": 1,
       "position": [
         -100,
-        -360
+        -420
       ],
       "parameters": {
-        "width": 620,
-        "height": 280,
-        "content": "## Dashboard ← Zoho: отчёт по лидам\n\n**GET** `/webhook/leads-list?limit=200&search=...` (CORS: `*`, заголовок `x-api-key`).\n\nИсточник — Zoho CRM (COQL по Deals + связанный Contact), т.е. в отчёт попадают\n**все** лиды из всех автоматизаций (Telegram, FB Forms, IG DM, SMS, Dashboard...).\n\nОтвет — JSON-массив: `added, first_name, last_name, phone, email, city, zip,\ncontact_time, source, status, deal_stage, deal_id` (сортировка по Created_Time desc)."
+        "width": 660,
+        "height": 340,
+        "content": "## Dashboard ← Zoho: отчёт, журнал и lookup\n\n**GET** `/webhook/leads-list` (CORS: `*`, заголовок `x-api-key`). Три режима:\n\n1. Без параметров (`?limit=`, `?search=`) — последние сделки из Zoho\n   (`GET /crm/v2/Deals`, scope modules — тот же, что у upsert-нод).\n2. `?via=dashboard` — вся история лидов, добавленных через дашборд,\n   из журнала Google Sheets (лист **Dashboard Leads**).\n3. `?lookup=<телефон или имя>` — поиск по Zoho: телефон ищется по вариантам\n   номера (`Phone:equals`), имя — word-search; возвращаются полные карточки\n   Deals + Contacts (`{ok, term, deals:[], contacts:[]}`).\n\nРежимы 1–2 отвечают JSON-массивом лидов; ошибки — `{ok:false, error}`."
       }
     },
     {
@@ -79,7 +79,7 @@
       "typeVersion": 1.1,
       "position": [
         440,
-        160
+        220
       ],
       "parameters": {
         "respondWith": "text",
@@ -102,35 +102,262 @@
       }
     },
     {
-      "name": "Build COQL",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "name": "Lookup?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
       "position": [
         440,
         -60
       ],
       "parameters": {
-        "jsCode": "// Строим COQL-запрос к Zoho Deals с учётом query-параметров ?limit= и ?search=\nconst q = $json.query || {};\nlet limit = parseInt(q.limit, 10);\nif (!Number.isFinite(limit) || limit <= 0) limit = 200;\nlimit = Math.min(limit, 200);\nconst search = String(q.search || '').replace(/['%\\\\]/g, '').trim().slice(0, 60);\nlet where = 'Created_Time is not null';\nif (search) {\n  where += ` and (Deal_Name like '%${search}%' or Phone like '%${search}%' or Lead_Source like '%${search}%' or Stage like '%${search}%')`;\n}\nconst select_query = `select Deal_Name, Phone, Stage, Lead_Source, Created_Time, Zip_Code, Best_Contact_Time, Description, Contact_Name.First_Name, Contact_Name.Last_Name, Contact_Name.Email, Contact_Name.Mailing_State from Deals where ${where} order by Created_Time desc limit ${limit}`;\nreturn [{ json: { select_query } }];\n"
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "lookup-check-1",
+              "leftValue": "={{ $json.query.lookup || '' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
       }
     },
     {
-      "name": "Zoho: COQL Query",
+      "name": "Build Lookup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        -220
+      ],
+      "parameters": {
+        "jsCode": "// Lookup: поиск лида в Zoho по телефону (варианты номера) или по имени (word search)\nconst q = $json.query || {};\nconst term = String(q.lookup || '').trim().slice(0, 80);\nconst digits = term.replace(/\\D/g, '');\nlet dealsUrl, contactsUrl;\n\nif (digits.length >= 7 && digits.length >= term.replace(/[\\s()+.\\-]/g, '').length - 1) {\n  const variants = new Set();\n  if (digits.length === 10) {\n    ['+1' + digits, digits, '1' + digits].forEach(v => variants.add(v));\n  } else if (digits.length === 11 && digits.startsWith('1')) {\n    const n = digits.slice(1);\n    ['+1' + n, n, digits, '+' + digits].forEach(v => variants.add(v));\n  } else {\n    variants.add(digits);\n    variants.add('+' + digits);\n  }\n  const crit = '(' + [...variants].map(v => `(Phone:equals:${v})`).join('or') + ')';\n  const enc = encodeURIComponent(crit);\n  dealsUrl = `https://www.zohoapis.com/crm/v2/Deals/search?criteria=${enc}&per_page=20`;\n  contactsUrl = `https://www.zohoapis.com/crm/v2/Contacts/search?criteria=${enc}&per_page=20`;\n} else {\n  const word = encodeURIComponent(term);\n  dealsUrl = `https://www.zohoapis.com/crm/v2/Deals/search?word=${word}&per_page=20`;\n  contactsUrl = `https://www.zohoapis.com/crm/v2/Contacts/search?word=${word}&per_page=20`;\n}\n\nreturn [{ json: { dealsUrl, contactsUrl, term } }];\n"
+      }
+    },
+    {
+      "name": "Zoho: Lookup Deals",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        660,
-        -60
+        860,
+        -220
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
       "parameters": {
-        "method": "POST",
-        "url": "https://www.zohoapis.com/crm/v2/coql",
+        "url": "={{ $json.dealsUrl }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "zohoOAuth2Api",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ select_query: $json.select_query }) }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "zohoOAuth2Api": {
+          "id": "8aqN9treZ1cKRtr2",
+          "name": "Zoho account"
+        }
+      }
+    },
+    {
+      "name": "Zoho: Lookup Contacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1060,
+        -220
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "url": "={{ $('Build Lookup').item.json.contactsUrl }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "zohoOAuth2Api",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "zohoOAuth2Api": {
+          "id": "8aqN9treZ1cKRtr2",
+          "name": "Zoho account"
+        }
+      }
+    },
+    {
+      "name": "Merge Lookup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1260,
+        -220
+      ],
+      "parameters": {
+        "jsCode": "// Сводим результаты поиска Deals + Contacts в детальные карточки (все непустые поля)\nconst dealsResp = $('Zoho: Lookup Deals').first().json || {};\nconst contactsResp = $input.first().json || {};\n\nconst clean = (rec) => {\n  const out = {};\n  for (const [k, v] of Object.entries(rec)) {\n    if (k.startsWith('$')) continue;\n    if (v === null || v === undefined || v === '') continue;\n    if (Array.isArray(v)) {\n      if (v.length) out[k] = v.map(x => (x && (x.name || x.id)) || x).join(', ');\n    } else if (typeof v === 'object') {\n      if (v.name) out[k] = v.name;\n      else if (v.id) out[k] = v.id;\n    } else {\n      out[k] = v;\n    }\n  }\n  return out;\n};\nconst pickErr = (resp) => {\n  if (resp.error) return String(resp.error.message || resp.error.description || JSON.stringify(resp.error)).slice(0, 200);\n  if (resp.code && resp.message) return (resp.code + ' ' + resp.message).slice(0, 200);\n  return '';\n};\n\nconst deals = (Array.isArray(dealsResp.data) ? dealsResp.data : []).map(clean);\nconst contacts = (Array.isArray(contactsResp.data) ? contactsResp.data : []).map(clean);\nconst error = pickErr(dealsResp) || pickErr(contactsResp);\n\nreturn [{\n  json: {\n    ok: !error,\n    error,\n    term: $('Build Lookup').first().json.term,\n    deals,\n    contacts,\n  },\n}];\n"
+      }
+    },
+    {
+      "name": "Respond Lookup",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1460,
+        -220
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Journal?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        660,
+        -20
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "journal-check-1",
+              "leftValue": "={{ $json.query.via || '' }}",
+              "rightValue": "dashboard",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "name": "Sheets: Read Journal",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        880,
+        -120
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "10Yr6hkRJK2C6PCvQ1P_t5s1VUls-LZi-1xi8N4j91Z8",
+          "mode": "list",
+          "cachedResultName": "DEAL CREATOR CHAT TRACKER",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/10Yr6hkRJK2C6PCvQ1P_t5s1VUls-LZi-1xi8N4j91Z8/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Dashboard Leads",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "HWi3hgVZ1OjoFkBZ",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "name": "Map Journal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "// Вид \"Via Dashboard\": вся история дашборд-лидов из журнала Google Sheets\nconst items = $input.all();\nconst q = $('Webhook').first().json.query || {};\nlet error = '';\nlet leads = [];\nfor (const it of items) {\n  const j = it.json || {};\n  if (j.error) {\n    const e = j.error;\n    error = 'Journal sheet error: ' + String(e.message || e.description || JSON.stringify(e)).slice(0, 200)\n      + \" — check that the 'Dashboard Leads' tab exists\";\n    continue;\n  }\n  if (!j['Added'] && !j['Phone'] && !j['First Name']) continue;\n  leads.push({\n    added: j['Added'] || '',\n    first_name: j['First Name'] || '',\n    last_name: j['Last Name'] || '',\n    phone: j['Phone'] || '',\n    email: j['Email'] || '',\n    city: j['City'] || '',\n    zip: j['ZIP'] || '',\n    contact_time: j['Contact Time'] || '',\n    source: j['Source'] || '',\n    status: j['Status'] || '',\n    deal_stage: j['Deal Stage'] || '',\n    deal_id: j['Deal ID'] || '',\n    via_dashboard: true,\n  });\n}\nleads.sort((a, b) => String(b.added).localeCompare(String(a.added)));\nconst search = String(q.search || '').trim().toLowerCase();\nif (search) leads = leads.filter(l => JSON.stringify(l).toLowerCase().includes(search));\nconst limit = parseInt(q.limit, 10);\nif (Number.isFinite(limit) && limit > 0) leads = leads.slice(0, limit);\n\nreturn [{ json: { ok: !error, error, count: leads.length, leads } }];\n"
+      }
+    },
+    {
+      "name": "Respond Journal",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1280,
+        -120
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.ok ? JSON.stringify($json.leads) : JSON.stringify({ ok: false, error: $json.error }) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Zoho: List Deals",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        80
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "url": "=https://www.zohoapis.com/crm/v2/Deals?sort_by=Created_Time&sort_order=desc&per_page={{ Math.min(Math.max(parseInt($json.query.limit, 10) || 200, 1), 200) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "zohoOAuth2Api",
         "options": {
           "timeout": 20000
         }
@@ -147,11 +374,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        880,
-        -60
+        1080,
+        80
       ],
       "parameters": {
-        "jsCode": "// Приводим ответ COQL к плоскому массиву лидов для дашборда\nconst resp = $input.first().json || {};\nconst q = $('Webhook').first().json.query || {};\nlet rows = Array.isArray(resp.data) ? resp.data : [];\nlet error = '';\nif (!Array.isArray(resp.data) && Object.keys(resp).length > 0) {\n  if (resp.message || resp.code) error = ('Zoho: ' + (resp.code || '') + ' ' + (resp.message || '')).trim();\n}\n// COQL может вернуть lookup-поля как \"Contact_Name.First_Name\" или вложенным объектом\nconst g = (r, k) => {\n  if (r[k] !== undefined && r[k] !== null) return r[k];\n  let v = r;\n  for (const p of k.split('.')) v = (v && typeof v === 'object') ? v[p] : undefined;\n  return v == null ? '' : v;\n};\nlet leads = rows.map(r => {\n  let added = '';\n  if (r.Created_Time) {\n    const dt = DateTime.fromISO(r.Created_Time).setZone('America/New_York');\n    added = dt.isValid ? dt.toFormat('yyyy-MM-dd HH:mm') : String(r.Created_Time);\n  }\n  let first = g(r, 'Contact_Name.First_Name') || '';\n  let last = g(r, 'Contact_Name.Last_Name') || '';\n  if (!first && !last && r.Deal_Name) {\n    const parts = String(r.Deal_Name).trim().split(/\\s+/);\n    first = parts.shift() || '';\n    last = parts.join(' ');\n  }\n  return {\n    added,\n    first_name: first,\n    last_name: last,\n    phone: r.Phone || '',\n    email: g(r, 'Contact_Name.Email') || '',\n    city: g(r, 'Contact_Name.Mailing_State') || '',\n    zip: r.Zip_Code || '',\n    contact_time: r.Best_Contact_Time || '',\n    source: r.Lead_Source || '',\n    status: r.Stage || '',\n    deal_stage: r.Stage || '',\n    deal_id: r.id || '',\n    via_dashboard: /Added via Dashboard/i.test(String(r.Description || '')),\n  };\n});\n// Подстраховка: фильтр/лимит на нашей стороне (COQL уже применил своё)\nconst search = String(q.search || '').trim().toLowerCase();\nif (search) leads = leads.filter(l => JSON.stringify(l).toLowerCase().includes(search));\nconst limit = parseInt(q.limit, 10);\nif (Number.isFinite(limit) && limit > 0) leads = leads.slice(0, limit);\n\nreturn [{ json: { ok: !error, error, count: leads.length, leads } }];\n"
+        "jsCode": "// Приводим ответ GET /crm/v2/Deals к плоскому массиву лидов для дашборда\nconst resp = $input.first().json || {};\nconst q = $('Webhook').first().json.query || {};\nlet rows = Array.isArray(resp.data) ? resp.data : [];\nlet error = '';\nif (!Array.isArray(resp.data) && Object.keys(resp).length > 0) {\n  if (resp.error) {\n    const e = resp.error;\n    error = 'Zoho: ' + String(e.message || e.description || (typeof e === 'string' ? e : JSON.stringify(e))).slice(0, 300);\n  } else if (resp.message || resp.code) {\n    error = ('Zoho: ' + (resp.code || '') + ' ' + (resp.message || '')).trim();\n  }\n}\nlet leads = rows.map(r => {\n  let added = '';\n  if (r.Created_Time) {\n    const dt = DateTime.fromISO(r.Created_Time).setZone('America/New_York');\n    added = dt.isValid ? dt.toFormat('yyyy-MM-dd HH:mm') : String(r.Created_Time);\n  }\n  const contactName = (r.Contact_Name && r.Contact_Name.name) || '';\n  let first = '', last = '';\n  const nameSrc = contactName || r.Deal_Name || '';\n  if (nameSrc) {\n    const parts = String(nameSrc).trim().split(/\\s+/);\n    first = parts.shift() || '';\n    last = parts.join(' ');\n  }\n  return {\n    added,\n    first_name: first,\n    last_name: last,\n    phone: r.Phone || '',\n    zip: r.Zip_Code || '',\n    contact_time: r.Best_Contact_Time || '',\n    source: r.Lead_Source || '',\n    status: r.Stage || '',\n    deal_stage: r.Stage || '',\n    deal_id: r.id || '',\n    via_dashboard: /Added via Dashboard/i.test(String(r.Description || '')),\n  };\n});\nconst search = String(q.search || '').trim().toLowerCase();\nif (search) leads = leads.filter(l => JSON.stringify(l).toLowerCase().includes(search));\nconst limit = parseInt(q.limit, 10);\nif (Number.isFinite(limit) && limit > 0) leads = leads.slice(0, limit);\n\nreturn [{ json: { ok: !error, error, count: leads.length, leads } }];\n"
       }
     },
     {
@@ -159,8 +386,8 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        1100,
-        -60
+        1280,
+        80
       ],
       "parameters": {
         "respondWith": "text",
@@ -199,7 +426,7 @@
       "main": [
         [
           {
-            "node": "Build COQL",
+            "node": "Lookup?",
             "type": "main",
             "index": 0
           }
@@ -213,18 +440,109 @@
         ]
       ]
     },
-    "Build COQL": {
+    "Lookup?": {
       "main": [
         [
           {
-            "node": "Zoho: COQL Query",
+            "node": "Build Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Journal?",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Zoho: COQL Query": {
+    "Build Lookup": {
+      "main": [
+        [
+          {
+            "node": "Zoho: Lookup Deals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoho: Lookup Deals": {
+      "main": [
+        [
+          {
+            "node": "Zoho: Lookup Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoho: Lookup Contacts": {
+      "main": [
+        [
+          {
+            "node": "Merge Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Lookup": {
+      "main": [
+        [
+          {
+            "node": "Respond Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Journal?": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Read Journal",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Zoho: List Deals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Read Journal": {
+      "main": [
+        [
+          {
+            "node": "Map Journal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Journal": {
+      "main": [
+        [
+          {
+            "node": "Respond Journal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoho: List Deals": {
       "main": [
         [
           {

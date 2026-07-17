@@ -94,16 +94,20 @@ Added | First Name | Last Name | Phone | Email | City | ZIP | Contact Time | Bes
 
 Тот же токен впишите в дашборде на вкладке «Настройки». Если переменная не задана и поле токена в дашборде пустое — проверка проходит (режим без токена); заданный с одной стороны токен даст `401`.
 
-## 3. Отчёт (leads-list)
+## 3. Отчёт (leads-list): три режима
 
-Источник — Zoho CRM напрямую (COQL по модулю Deals + связанный Contact), поэтому в отчёт попадают **все** лиды из всех автоматизаций (Telegram, Facebook Forms, Instagram DM, SMS, Dashboard), а не только созданные через форму.
+`GET /webhook/leads-list` работает в трёх режимах:
 
-Параметры: `?limit=1..200` (по умолчанию 200), `?search=строка` (ищет по имени сделки, телефону, источнику, стадии). Ответ — JSON-массив объектов:
+1. **Список** (без параметров, `?limit=1..200`, `?search=строка`) — последние сделки прямо из Zoho (`GET /crm/v2/Deals`, тот же OAuth-scope, что у upsert-нод), т.е. **все** лиды из всех автоматизаций (Telegram, Facebook Forms, Instagram DM, SMS, Dashboard). Вкладки «Today» / «All» на дашборде.
+2. **Журнал дашборда** (`?via=dashboard`) — вся история лидов, добавленных через дашборд, из листа Google Sheets **Dashboard Leads** (без ограничения по датам). Вкладка «Via Dashboard».
+3. **Lookup** (`?lookup=<телефон или имя>`) — поиск по Zoho: телефон ищется точным совпадением по вариантам номера, имя — word-поиском; возвращаются полные карточки `{ok, term, deals:[], contacts:[]}`. Вкладка «Lookup» на дашборде.
+
+Формат массива лидов (режимы 1–2):
 
 ```json
 [{ "added": "2026-07-16 10:12", "first_name": "...", "last_name": "...", "phone": "+1...",
-   "email": "...", "city": "...", "zip": "...", "contact_time": "...",
-   "source": "...", "status": "...", "deal_stage": "...", "deal_id": "..." }]
+   "zip": "...", "contact_time": "...", "source": "...", "status": "...",
+   "deal_stage": "...", "deal_id": "...", "via_dashboard": true }]
 ```
 
 ## 4. Деплой дашборда на GitHub Pages

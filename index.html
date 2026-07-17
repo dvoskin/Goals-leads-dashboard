@@ -63,6 +63,7 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
 
 <nav>
   <button data-tab="report" class="active">📊 Report</button>
+  <button data-tab="lookup">🔍 Lookup</button>
   <button data-tab="add">➕ New Lead</button>
   <button data-tab="settings">⚙️ Settings</button>
 </nav>
@@ -94,6 +95,19 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
       <table id="tbl"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table>
     </div>
     <div class="note" id="reportNote">Showing demo data. Set the report webhook URL in Settings to pull real leads from n8n / Zoho.</div>
+  </div>
+</section>
+
+<!-- ============ LOOKUP ============ -->
+<section id="tab-lookup" style="display:none">
+  <div class="card">
+    <h2 style="margin-top:0;font-size:18px">🔍 Check a lead in Zoho</h2>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <input id="lookupTerm" placeholder="Phone or contact name… e.g. 6015651047 or Chandra Magee" style="max-width:420px" onkeydown="if(event.key==='Enter')runLookup()">
+      <button class="btn" id="lookupBtn" onclick="runLookup()">Search Zoho</button>
+    </div>
+    <div class="msg" id="lookupMsg"></div>
+    <div id="lookupResults" style="margin-top:14px"></div>
   </div>
 </section>
 
@@ -189,7 +203,7 @@ function apiHeaders(extra){
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));
   b.classList.add('active');
-  ['report','add','settings'].forEach(t=>document.getElementById('tab-'+t).style.display='none');
+  ['report','lookup','add','settings'].forEach(t=>document.getElementById('tab-'+t).style.display='none');
   document.getElementById('tab-'+b.dataset.tab).style.display='';
 });
 
@@ -238,6 +252,7 @@ async function loadReport(){
     const u=new URL(cfg.report);
     const lim=parseInt(cfg.limit,10);
     if(Number.isFinite(lim)&&lim>0) u.searchParams.set('limit',Math.min(lim,200));
+    if(viewMode==='dash') u.searchParams.set('via','dashboard');
     const r=await fetch(u,{headers:apiHeaders()});
     let data=null;
     try{ data=await r.json(); }catch(_){ data=null; }
@@ -304,7 +319,10 @@ document.getElementById('search').addEventListener('input',renderTable);
 ['fltSource','fltStage'].forEach(id=>document.getElementById(id).addEventListener('change',renderTable));
 document.querySelectorAll('#viewSeg button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#viewSeg button').forEach(x=>x.classList.remove('active'));
-  b.classList.add('active'); viewMode=b.dataset.view; renderTable();
+  const prev=viewMode;
+  b.classList.add('active'); viewMode=b.dataset.view;
+  // Вид "Via Dashboard" тянет полную историю из журнала — это отдельный запрос
+  if(cfg.report&&(viewMode==='dash'||prev==='dash')) loadReport(); else renderTable();
 });
 function exportCsv(){
   const c=cols(); const data=filteredRows();
@@ -345,6 +363,52 @@ async function submitLead(e){
     e.target.reset(); loadReport();
   }catch(err){ m.className='msg err'; m.textContent='Send error: '+err.message+' (check webhook URL, token and CORS).'; }
   finally{ btn.disabled=false; btn.textContent='Create in Zoho'; }
+}
+
+// ---------- lookup (search Zoho by phone or name) ----------
+const PRIORITY_FIELDS=['Deal_Name','Full_Name','First_Name','Last_Name','Phone','Email','Stage','Lead_Source','Contact_Name','Best_Contact_Time','Call_Scheduled_Date_Time','Client_Timezone','Created_Time','Modified_Time','Owner','Mailing_State','Mailing_Zip','Zip_Code','Language','Description'];
+function recordCard(rec,kind){
+  const title=rec.Deal_Name||rec.Full_Name||((rec.First_Name||'')+' '+(rec.Last_Name||'')).trim()||rec.id||'—';
+  const keys=Object.keys(rec).filter(k=>k!=='id');
+  keys.sort((a,b)=>{
+    const ia=PRIORITY_FIELDS.indexOf(a),ib=PRIORITY_FIELDS.indexOf(b);
+    return (ia<0?999:ia)-(ib<0?999:ib)||a.localeCompare(b);
+  });
+  const rows=keys.map(k=>{
+    let v=String(rec[k]??'');
+    if(/_Time$/.test(k)&&v.includes('T')) v=v.slice(0,16).replace('T',' ');
+    return `<div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px solid var(--line)">
+      <span class="muted" style="min-width:190px;font-size:12.5px">${esc(k.replace(/_/g,' '))}</span>
+      <span style="word-break:break-word;white-space:pre-wrap">${esc(v)}</span></div>`;
+  }).join('');
+  const zohoUrl=rec.id?`https://crm.zoho.com/crm/tab/${kind==='deal'?'Potentials':'Contacts'}/${esc(rec.id)}`:null;
+  return `<div class="card" style="margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <b style="font-size:15.5px">${kind==='deal'?'💼':'👤'} ${esc(title)}</b>
+      <span>${rec.Stage?`<span class="pill">${esc(rec.Stage)}</span>`:''}
+      ${zohoUrl?` <a href="${zohoUrl}" target="_blank" rel="noopener" style="color:var(--acc);font-size:12.5px">open in Zoho ↗</a>`:''}</span>
+    </div>${rows}</div>`;
+}
+async function runLookup(){
+  const m=document.getElementById('lookupMsg'); m.className='msg'; m.textContent='';
+  const box=document.getElementById('lookupResults'); box.innerHTML='';
+  const term=document.getElementById('lookupTerm').value.trim();
+  if(!term){ m.className='msg err'; m.textContent='Enter a phone number or a contact name.'; return; }
+  if(!cfg.report){ m.className='msg err'; m.textContent='Report webhook is not set — open Settings.'; return; }
+  const btn=document.getElementById('lookupBtn'); btn.disabled=true; btn.textContent='Searching…';
+  try{
+    const u=new URL(cfg.report); u.searchParams.set('lookup',term);
+    const r=await fetch(u,{headers:apiHeaders()});
+    let data=null; try{ data=await r.json(); }catch(_){}
+    if(!r.ok||!data) throw new Error((data&&data.error)||('HTTP '+r.status));
+    if(data.ok===false) throw new Error(data.error||'Zoho search failed');
+    const deals=data.deals||[], contacts=data.contacts||[];
+    if(!deals.length&&!contacts.length){ m.className='msg err'; m.textContent='Nothing found in Zoho for "'+term+'".'; return; }
+    m.className='msg ok'; m.textContent='Found: '+deals.length+' deal(s), '+contacts.length+' contact(s).';
+    box.innerHTML=(deals.length?`<h3 style="font-size:15px;margin:6px 0">Deals (${deals.length})</h3>`+deals.map(d=>recordCard(d,'deal')).join(''):'')
+      +(contacts.length?`<h3 style="font-size:15px;margin:14px 0 6px">Contacts (${contacts.length})</h3>`+contacts.map(c=>recordCard(c,'contact')).join(''):'');
+  }catch(err){ m.className='msg err'; m.textContent='Error: '+err.message+' (check webhook URL, token and CORS).'; }
+  finally{ btn.disabled=false; btn.textContent='Search Zoho'; }
 }
 
 // ---------- paste lead (raw text → AI parser in n8n) ----------
