@@ -257,13 +257,15 @@ async function loadReport(){
     let data=null;
     try{ data=await r.json(); }catch(_){ data=null; }
     if(!r.ok) throw new Error('HTTP '+r.status+(data&&data.error?' — '+data.error:''));
+    let notice='';
     if(!Array.isArray(data)){
       if(data&&data.error) throw new Error(data.error);
+      notice=(data&&data.notice)||'';
       data=(data&&(data.leads||data.data||data.rows))||[];
     }
     rows=data;
     document.getElementById('reportNote').style.display='none';
-    hint.textContent='';
+    hint.textContent=notice?('⚠ '+notice):'';
     document.getElementById('stUpd').textContent=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
   }catch(e){
     hint.textContent='error: '+e.message+' (check URL, token and CORS)';

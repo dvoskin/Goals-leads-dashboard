@@ -345,17 +345,92 @@
       }
     },
     {
-      "name": "Zoho: List Deals",
+      "name": "Build COQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        80
+      ],
+      "parameters": {
+        "jsCode": "// Строим COQL-запрос к Zoho Deals с учётом query-параметров ?limit= и ?search=\nconst q = $json.query || {};\nlet limit = parseInt(q.limit, 10);\nif (!Number.isFinite(limit) || limit <= 0) limit = 200;\nlimit = Math.min(limit, 200);\nconst search = String(q.search || '').replace(/['%\\\\]/g, '').trim().slice(0, 60);\nlet where = 'Created_Time is not null';\nif (search) {\n  where += ` and (Deal_Name like '%${search}%' or Phone like '%${search}%' or Lead_Source like '%${search}%' or Stage like '%${search}%')`;\n}\nconst select_query = `select Deal_Name, Phone, Stage, Lead_Source, Created_Time, Zip_Code, Best_Contact_Time, Description, Contact_Name.First_Name, Contact_Name.Last_Name, Contact_Name.Email, Contact_Name.Mailing_State from Deals where ${where} order by Created_Time desc limit ${limit}`;\nreturn [{ json: { select_query } }];\n"
+      }
+    },
+    {
+      "name": "Zoho: COQL Query",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        880,
+        1080,
         80
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
       "parameters": {
-        "url": "=https://www.zohoapis.com/crm/v2/Deals?sort_by=Created_Time&sort_order=desc&per_page={{ Math.min(Math.max(parseInt($json.query.limit, 10) || 200, 1), 200) }}",
+        "method": "POST",
+        "url": "https://www.zohoapis.com/crm/v2/coql",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "zohoOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ select_query: $json.select_query }) }}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "zohoOAuth2Api": {
+          "id": "8aqN9treZ1cKRtr2",
+          "name": "Zoho account"
+        }
+      }
+    },
+    {
+      "name": "COQL Failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1280,
+        80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "coqlfail-check-1",
+              "leftValue": "={{ $json.error ? 'yes' : 'no' }}",
+              "rightValue": "yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "name": "Zoho: List Deals",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1480,
+        180
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "url": "=https://www.zohoapis.com/crm/v2/Deals?sort_by=Created_Time&sort_order=desc&per_page={{ Math.min(Math.max(parseInt($('Webhook').item.json.query.limit, 10) || 200, 1), 200) }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "zohoOAuth2Api",
         "options": {
@@ -374,11 +449,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1080,
+        1680,
         80
       ],
       "parameters": {
-        "jsCode": "// Приводим ответ GET /crm/v2/Deals к плоскому массиву лидов для дашборда\nconst resp = $input.first().json || {};\nconst q = $('Webhook').first().json.query || {};\nlet rows = Array.isArray(resp.data) ? resp.data : [];\nlet error = '';\nif (!Array.isArray(resp.data) && Object.keys(resp).length > 0) {\n  if (resp.error) {\n    const e = resp.error;\n    error = 'Zoho: ' + String(e.message || e.description || (typeof e === 'string' ? e : JSON.stringify(e))).slice(0, 300);\n  } else if (resp.message || resp.code) {\n    error = ('Zoho: ' + (resp.code || '') + ' ' + (resp.message || '')).trim();\n  }\n}\nlet leads = rows.map(r => {\n  let added = '';\n  if (r.Created_Time) {\n    const dt = DateTime.fromISO(r.Created_Time).setZone('America/New_York');\n    added = dt.isValid ? dt.toFormat('yyyy-MM-dd HH:mm') : String(r.Created_Time);\n  }\n  const contactName = (r.Contact_Name && r.Contact_Name.name) || '';\n  let first = '', last = '';\n  const nameSrc = contactName || r.Deal_Name || '';\n  if (nameSrc) {\n    const parts = String(nameSrc).trim().split(/\\s+/);\n    first = parts.shift() || '';\n    last = parts.join(' ');\n  }\n  return {\n    added,\n    first_name: first,\n    last_name: last,\n    phone: r.Phone || '',\n    zip: r.Zip_Code || '',\n    contact_time: r.Best_Contact_Time || '',\n    source: r.Lead_Source || '',\n    status: r.Stage || '',\n    deal_stage: r.Stage || '',\n    deal_id: r.id || '',\n    via_dashboard: /Added via Dashboard/i.test(String(r.Description || '')),\n  };\n});\nconst search = String(q.search || '').trim().toLowerCase();\nif (search) leads = leads.filter(l => JSON.stringify(l).toLowerCase().includes(search));\nconst limit = parseInt(q.limit, 10);\nif (Number.isFinite(limit) && limit > 0) leads = leads.slice(0, limit);\n\nreturn [{ json: { ok: !error, error, count: leads.length, leads } }];\n"
+        "jsCode": "// Универсальный маппер: вход — ответ COQL (плоские ключи \"Contact_Name.X\")\n// или REST GET /Deals (Contact_Name: {name,id}) из запасной ветки.\nconst resp = $input.first().json || {};\nconst q = $('Webhook').first().json.query || {};\nlet rows = Array.isArray(resp.data) ? resp.data : [];\nlet error = '';\nif (!Array.isArray(resp.data) && Object.keys(resp).length > 0) {\n  if (resp.error) {\n    const e = resp.error;\n    error = 'Zoho: ' + String(e.message || e.description || (typeof e === 'string' ? e : JSON.stringify(e))).slice(0, 300);\n  } else if (resp.message || resp.code) {\n    error = ('Zoho: ' + (resp.code || '') + ' ' + (resp.message || '')).trim();\n  }\n}\nconst g = (r, k) => {\n  if (r[k] !== undefined && r[k] !== null) return r[k];\n  let v = r;\n  for (const p of k.split('.')) v = (v && typeof v === 'object') ? v[p] : undefined;\n  return v == null ? '' : v;\n};\n// COQL отдаёт поля контакта; REST-фолбэк — нет (тогда Email/City не включаем вовсе,\n// чтобы на дашборде не висели пустые колонки)\nconst coqlMode = rows.some(r => Object.keys(r).some(k => k.startsWith('Contact_Name.')));\n\nlet leads = rows.map(r => {\n  let added = '';\n  if (r.Created_Time) {\n    const dt = DateTime.fromISO(r.Created_Time).setZone('America/New_York');\n    added = dt.isValid ? dt.toFormat('yyyy-MM-dd HH:mm') : String(r.Created_Time);\n  }\n  let first = String(g(r, 'Contact_Name.First_Name') || '');\n  let last = String(g(r, 'Contact_Name.Last_Name') || '');\n  if (!first && !last) {\n    const nameSrc = (r.Contact_Name && r.Contact_Name.name) || r.Deal_Name || '';\n    const parts = String(nameSrc).trim().split(/\\s+/);\n    first = parts.shift() || '';\n    last = parts.join(' ');\n  }\n  const lead = { added, first_name: first, last_name: last, phone: r.Phone || '' };\n  if (coqlMode) {\n    lead.email = String(g(r, 'Contact_Name.Email') || '');\n    lead.city = String(g(r, 'Contact_Name.Mailing_State') || '');\n  }\n  lead.zip = r.Zip_Code || '';\n  lead.contact_time = r.Best_Contact_Time || '';\n  lead.source = r.Lead_Source || '';\n  lead.status = r.Stage || '';\n  lead.deal_stage = r.Stage || '';\n  lead.deal_id = r.id || '';\n  lead.via_dashboard = /Added via Dashboard/i.test(String(r.Description || ''));\n  return lead;\n});\nconst search = String(q.search || '').trim().toLowerCase();\nif (search) leads = leads.filter(l => JSON.stringify(l).toLowerCase().includes(search));\nconst limit = parseInt(q.limit, 10);\nif (Number.isFinite(limit) && limit > 0) leads = leads.slice(0, limit);\n\n// Если сработал REST-фолбэк, покажем причину отказа COQL в подсказке дашборда\nlet notice = '';\ntry {\n  const coqlResp = $('Zoho: COQL Query').first().json || {};\n  if (coqlResp.error) {\n    const e = coqlResp.error;\n    notice = 'COQL unavailable (' + String(e.message || e.description || JSON.stringify(e)).slice(0, 160) + ') — using REST fallback without Email/City';\n  }\n} catch (e) { /* COQL-ноды в этом прогоне не было */ }\n\nreturn [{ json: { ok: !error, error, notice, count: leads.length, leads } }];\n"
       }
     },
     {
@@ -386,12 +461,12 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        1280,
+        1880,
         80
       ],
       "parameters": {
         "respondWith": "text",
-        "responseBody": "={{ $json.ok ? JSON.stringify($json.leads) : JSON.stringify({ ok: false, error: $json.error }) }}",
+        "responseBody": "={{ $json.ok ? ($json.notice ? JSON.stringify({ leads: $json.leads, notice: $json.notice }) : JSON.stringify($json.leads)) : JSON.stringify({ ok: false, error: $json.error }) }}",
         "options": {
           "responseCode": 200,
           "responseHeaders": {
@@ -513,7 +588,7 @@
         ],
         [
           {
-            "node": "Zoho: List Deals",
+            "node": "Build COQL",
             "type": "main",
             "index": 0
           }
@@ -536,6 +611,46 @@
         [
           {
             "node": "Respond Journal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build COQL": {
+      "main": [
+        [
+          {
+            "node": "Zoho: COQL Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoho: COQL Query": {
+      "main": [
+        [
+          {
+            "node": "COQL Failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "COQL Failed?": {
+      "main": [
+        [
+          {
+            "node": "Zoho: List Deals",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Map Rows",
             "type": "main",
             "index": 0
           }
