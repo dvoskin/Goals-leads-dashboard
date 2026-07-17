@@ -102,6 +102,222 @@
       }
     },
     {
+      "name": "Sheet Mode?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        440,
+        -320
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "sheetmode-check-1",
+              "leftValue": "={{ ($json.query.sheet || $json.query.sheets || '') }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "name": "Resolve Doc",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        -420
+      ],
+      "parameters": {
+        "jsCode": "// Белый список Google-таблиц, доступных дашборду (все — из существующих автоматизаций)\nconst q = $json.query || {};\nconst DOCS = {\n  tracker:  { id: '10Yr6hkRJK2C6PCvQ1P_t5s1VUls-LZi-1xi8N4j91Z8', title: 'DEAL CREATOR CHAT TRACKER' },\n  deals:    { id: '17MGETzZ-p64JWDfb0q82xxnJ5ZdESKvS4ong2Kh45eE', title: 'DEALS TRACKER' },\n  ads:      { id: '19df3TsfnNzNxE7HYcDscgcdd0RngHKfFDSfBC2AKUAE', title: 'Goals Ads Facebook Forms To CRM' },\n  manychat: { id: '16fRN6rKNrW1QjB-M9qLbtIZKC1TpFs43tJkU1ZtT1Nc', title: 'AI MANYCHAT' },\n};\nconst key = String(q.doc || 'tracker').toLowerCase();\nconst doc = DOCS[key] || DOCS.tracker;\nreturn [{\n  json: {\n    docId: doc.id,\n    docTitle: doc.title,\n    sheetName: String(q.sheet || '').slice(0, 120),\n    query: q,\n  },\n}];\n"
+      }
+    },
+    {
+      "name": "Sheet List?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        860,
+        -420
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "sheetlist-check-1",
+              "leftValue": "={{ $json.query.sheets || '' }}",
+              "rightValue": "list",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "name": "Sheets: Doc Meta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1080,
+        -500
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "url": "=https://sheets.googleapis.com/v4/spreadsheets/{{ $json.docId }}?fields=sheets(properties(title,gridProperties(rowCount)))",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "HWi3hgVZ1OjoFkBZ",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "name": "Map Sheet List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        -500
+      ],
+      "parameters": {
+        "jsCode": "// Список вкладок таблицы (из Google Sheets API metadata)\nconst meta = $('Resolve Doc').first().json;\nconst resp = $input.first().json || {};\nlet error = '';\nlet sheets = [];\nif (resp.error) {\n  const e = resp.error;\n  error = 'Sheets: ' + String(e.message || e.description || JSON.stringify(e)).slice(0, 200);\n} else {\n  sheets = (resp.sheets || []).map(s => ({\n    title: (s.properties && s.properties.title) || '',\n    rows: (s.properties && s.properties.gridProperties && s.properties.gridProperties.rowCount) || 0,\n  })).filter(s => s.title);\n}\nreturn [{ json: { ok: !error, error, doc: meta.docTitle, sheets } }];\n"
+      }
+    },
+    {
+      "name": "Respond Sheet List",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1480,
+        -500
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Sheets: Read Tab",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1080,
+        -360
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $json.docId }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "={{ $json.sheetName }}",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "HWi3hgVZ1OjoFkBZ",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "name": "Map Sheet Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        -360
+      ],
+      "parameters": {
+        "jsCode": "// Строки выбранного листа -> JSON для дашборда (последние limit строк, новые сверху)\nconst items = $input.all();\nconst meta = $('Resolve Doc').first().json;\nlet error = '';\nconst rows = [];\nfor (const it of items) {\n  const j = it.json || {};\n  if (j.error) {\n    const e = j.error;\n    error = 'Sheets: ' + String(e.message || e.description || JSON.stringify(e)).slice(0, 200);\n    continue;\n  }\n  if (Object.keys(j).length === 0) continue;\n  const r = { ...j };\n  delete r.row_number;\n  rows.push(r);\n}\nlet limit = parseInt(meta.query.limit, 10);\nif (!Number.isFinite(limit) || limit <= 0) limit = 500;\nlimit = Math.min(limit, 1000);\nlet out = rows.slice(-limit).reverse();\nconst search = String(meta.query.search || '').trim().toLowerCase();\nif (search) out = out.filter(r => JSON.stringify(r).toLowerCase().includes(search));\n\nreturn [{\n  json: {\n    ok: !error,\n    error,\n    doc: meta.docTitle,\n    sheet: meta.sheetName,\n    total: rows.length,\n    count: out.length,\n    rows: out,\n  },\n}];\n"
+      }
+    },
+    {
+      "name": "Respond Sheet Rows",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1480,
+        -360
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
       "name": "Lookup?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
@@ -501,7 +717,7 @@
       "main": [
         [
           {
-            "node": "Lookup?",
+            "node": "Sheet Mode?",
             "type": "main",
             "index": 0
           }
@@ -509,6 +725,97 @@
         [
           {
             "node": "Respond 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheet Mode?": {
+      "main": [
+        [
+          {
+            "node": "Resolve Doc",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Lookup?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Doc": {
+      "main": [
+        [
+          {
+            "node": "Sheet List?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheet List?": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Doc Meta",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sheets: Read Tab",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Doc Meta": {
+      "main": [
+        [
+          {
+            "node": "Map Sheet List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Sheet List": {
+      "main": [
+        [
+          {
+            "node": "Respond Sheet List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Read Tab": {
+      "main": [
+        [
+          {
+            "node": "Map Sheet Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Map Sheet Rows": {
+      "main": [
+        [
+          {
+            "node": "Respond Sheet Rows",
             "type": "main",
             "index": 0
           }

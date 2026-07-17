@@ -64,6 +64,7 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
 <nav>
   <button data-tab="report" class="active">📊 Report</button>
   <button data-tab="lookup">🔍 Lookup</button>
+  <button data-tab="sheets">📑 Sheets</button>
   <button data-tab="add">➕ New Lead</button>
   <button data-tab="settings">⚙️ Settings</button>
 </nav>
@@ -108,6 +109,31 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
     </div>
     <div class="msg" id="lookupMsg"></div>
     <div id="lookupResults" style="margin-top:14px"></div>
+  </div>
+</section>
+
+<!-- ============ SHEETS ============ -->
+<section id="tab-sheets" style="display:none">
+  <div class="card">
+    <h2 style="margin-top:0;font-size:18px">📑 Google Sheets reports</h2>
+    <div class="toolbar">
+      <select id="shDoc" style="max-width:280px">
+        <option value="tracker">DEAL CREATOR CHAT TRACKER</option>
+        <option value="deals">DEALS TRACKER</option>
+        <option value="ads">Goals Ads Facebook Forms To CRM</option>
+        <option value="manychat">AI MANYCHAT</option>
+      </select>
+      <select id="shTab" style="max-width:240px"><option value="">Load tabs first…</option></select>
+      <button class="btn ghost" id="shTabsBtn" onclick="loadSheetTabs()">⟳ Tabs</button>
+      <button class="btn" id="shLoadBtn" onclick="loadSheetRows()">Load report</button>
+      <input id="shSearch" placeholder="🔎 Filter rows…" style="max-width:220px">
+      <button class="btn ghost" onclick="exportSheetCsv()">⬇ CSV</button>
+      <span class="muted" id="shHint" style="font-size:12.5px"></span>
+    </div>
+    <div class="tablewrap">
+      <table><thead><tr id="shThead"></tr></thead><tbody id="shTbody"></tbody></table>
+    </div>
+    <div class="note">Reads the journals your n8n automations write: Telegram (All Chat tracker), Facebook Form, Hair, Meta AI Chat, inbound SMS (RC), Negative Comments, DrChrono, Dashboard Leads and more. Latest 500 rows, newest first.</div>
   </div>
 </section>
 
@@ -203,7 +229,7 @@ function apiHeaders(extra){
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));
   b.classList.add('active');
-  ['report','lookup','add','settings'].forEach(t=>document.getElementById('tab-'+t).style.display='none');
+  ['report','lookup','sheets','add','settings'].forEach(t=>document.getElementById('tab-'+t).style.display='none');
   document.getElementById('tab-'+b.dataset.tab).style.display='';
 });
 
@@ -411,6 +437,69 @@ async function runLookup(){
       +(contacts.length?`<h3 style="font-size:15px;margin:14px 0 6px">Contacts (${contacts.length})</h3>`+contacts.map(c=>recordCard(c,'contact')).join(''):'');
   }catch(err){ m.className='msg err'; m.textContent='Error: '+err.message+' (check webhook URL, token and CORS).'; }
   finally{ btn.disabled=false; btn.textContent='Search Zoho'; }
+}
+
+// ---------- Google Sheets reports ----------
+let shRows=[],shSort=null,shDir=1;
+function shCols(){
+  const s=new Set(); shRows.forEach(r=>Object.keys(r).forEach(k=>s.add(k)));
+  return [...s];
+}
+async function sheetsFetch(params){
+  const u=new URL(cfg.report);
+  Object.entries(params).forEach(([k,v])=>u.searchParams.set(k,v));
+  const r=await fetch(u,{headers:apiHeaders()});
+  let data=null; try{ data=await r.json(); }catch(_){}
+  if(!r.ok||!data) throw new Error((data&&data.error)||('HTTP '+r.status));
+  if(data.ok===false) throw new Error(data.error||'request failed');
+  return data;
+}
+async function loadSheetTabs(){
+  const hint=document.getElementById('shHint');
+  if(!cfg.report){ hint.textContent='Set the report webhook URL in Settings first.'; return; }
+  const btn=document.getElementById('shTabsBtn'); btn.disabled=true; hint.textContent='loading tabs…';
+  try{
+    const data=await sheetsFetch({sheets:'list',doc:shDoc.value});
+    const sel=document.getElementById('shTab');
+    sel.innerHTML=(data.sheets||[]).map(s=>`<option value="${esc(s.title)}">${esc(s.title)}</option>`).join('')||'<option value="">no tabs</option>';
+    hint.textContent=(data.sheets||[]).length+' tabs in '+(data.doc||'');
+  }catch(e){ hint.textContent='error: '+e.message; }
+  finally{ btn.disabled=false; }
+}
+async function loadSheetRows(){
+  const hint=document.getElementById('shHint');
+  const tab=document.getElementById('shTab').value;
+  if(!cfg.report){ hint.textContent='Set the report webhook URL in Settings first.'; return; }
+  if(!tab){ hint.textContent='Pick a tab first (⟳ Tabs).'; return; }
+  const btn=document.getElementById('shLoadBtn'); btn.disabled=true; btn.textContent='Loading…';
+  try{
+    const data=await sheetsFetch({sheet:tab,doc:shDoc.value});
+    shRows=data.rows||[]; shSort=null;
+    hint.textContent='showing '+(data.count||0)+' of '+(data.total||0)+' rows · '+(data.doc||'')+' / '+(data.sheet||'');
+    renderSheetTable();
+  }catch(e){ hint.textContent='error: '+e.message; shRows=[]; renderSheetTable(); }
+  finally{ btn.disabled=false; btn.textContent='Load report'; }
+}
+function renderSheetTable(){
+  const q=(document.getElementById('shSearch').value||'').toLowerCase();
+  let data=shRows.filter(r=>!q||JSON.stringify(r).toLowerCase().includes(q));
+  if(shSort) data=data.slice().sort((a,b)=>String(a[shSort]??'').localeCompare(String(b[shSort]??''),'en',{numeric:true})*shDir);
+  const c=shCols();
+  document.getElementById('shThead').innerHTML=c.map(k=>`<th onclick="setShSort('${esc(k)}')">${esc(k)}${shSort===k?(shDir>0?' ▲':' ▼'):''}</th>`).join('');
+  document.getElementById('shTbody').innerHTML=data.map(r=>'<tr>'+c.map(k=>`<td title="${esc(r[k])}">${esc(r[k])}</td>`).join('')+'</tr>').join('')
+    || `<tr><td colspan="${c.length||1}" class="muted" style="padding:20px">No data — pick a tab and press “Load report”.</td></tr>`;
+}
+function setShSort(k){ if(shSort===k) shDir*=-1; else {shSort=k;shDir=1;} renderSheetTable(); }
+document.getElementById('shSearch').addEventListener('input',renderSheetTable);
+document.getElementById('shDoc').addEventListener('change',()=>{document.getElementById('shTab').innerHTML='<option value="">Load tabs first…</option>';loadSheetTabs();});
+function exportSheetCsv(){
+  const c=shCols(); if(!c.length) return;
+  const q=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+  const data=shRows.filter(r=>{const s=(document.getElementById('shSearch').value||'').toLowerCase();return !s||JSON.stringify(r).toLowerCase().includes(s);});
+  const csv=[c.join(',')].concat(data.map(r=>c.map(k=>q(r[k])).join(','))).join('\n');
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'}));
+  a.download='sheet_'+(document.getElementById('shTab').value||'report').replace(/[^\w-]+/g,'_')+'.csv'; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
 }
 
 // ---------- paste lead (raw text → AI parser in n8n) ----------
