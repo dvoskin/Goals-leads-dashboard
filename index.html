@@ -493,21 +493,22 @@ async function updateBctFromCard(btn){
   await updateBct(btn.dataset.deal,val,tz,btn.dataset.stage,btn,btn.dataset.zip||'');
 }
 // Chat button + rendering (Facebook page inbox via n8n)
-function chatButton(name,phone,boxId){
-  return `<div style="margin:6px 0 12px"><button class="btn ghost" data-name="${esc(name)}" data-phone="${esc(phone)}" data-box="${esc(boxId)}" onclick="loadMetaChat(this)">💬 Load Meta chat (Facebook)</button><div id="${esc(boxId)}"></div></div>`;
+function chatButton(name,phone,boxId,psid){
+  return `<div style="margin:6px 0 12px"><button class="btn ghost" data-name="${esc(name)}" data-phone="${esc(phone)}" data-psid="${esc(psid||'')}" data-box="${esc(boxId)}" onclick="loadMetaChat(this)">💬 Load Meta chat (Facebook)</button><div id="${esc(boxId)}"></div></div>`;
 }
 async function loadMetaChat(btn){
   const box=document.getElementById(btn.dataset.box);
-  btn.disabled=true; const orig=btn.textContent; btn.textContent='Loading chat…';
+  btn.disabled=true; const orig=btn.textContent; btn.textContent='Searching page inbox…';
   try{
     const u=new URL(cfg.report);
     if(btn.dataset.name) u.searchParams.set('chat',btn.dataset.name);
     if(btn.dataset.phone) u.searchParams.set('chat_phone',btn.dataset.phone);
+    if(btn.dataset.psid) u.searchParams.set('chat_psid',btn.dataset.psid);
     const r=await fetch(u,{headers:apiHeaders()});
     let data=null; try{ data=await r.json(); }catch(_){}
     if(!r.ok||!data) throw new Error((data&&data.error)||('HTTP '+r.status));
     if(data.ok===false) throw new Error(data.error||'chat fetch failed');
-    if(!data.found){ box.innerHTML='<div class="note">No Facebook conversation found for this lead (searched recent page inbox by phone and name).</div>'; return; }
+    if(!data.found){ box.innerHTML='<div class="note">No Facebook conversation found for this lead — searched '+(data.searched_threads||0)+' most recent page inbox threads by phone and name. Older chats can be reached only when the Zoho contact has an ID Manychat (profile id).</div>'; return; }
     box.innerHTML=data.conversations.map(c=>`
       <div class="card" style="margin-top:10px">
         <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
@@ -529,7 +530,8 @@ function bestNamePhone(deals,contacts){
   const c=(contacts&&contacts[0])||{}, d=(deals&&deals[0])||{};
   const name=c.Full_Name||((c.First_Name||'')+' '+(c.Last_Name||'')).trim()||d.Deal_Name||'';
   const phone=(c.Phone||d.Phone||'').replace(/\D/g,'').slice(-10);
-  return {name,phone};
+  const psid=String(c.ID_Manychat||d.ID_Manychat||'').replace(/\D/g,'');
+  return {name,phone,psid};
 }
 async function runLookup(){
   const m=document.getElementById('lookupMsg'); m.className='msg'; m.textContent='';
@@ -552,7 +554,7 @@ async function runLookup(){
     if(!deals.length&&!contacts.length){ m.className='msg err'; m.textContent=searchNote+'nothing found in Zoho for "'+term+'".'; return; }
     m.className='msg ok'; m.textContent=searchNote+'found: '+deals.length+' deal(s), '+contacts.length+' contact(s).';
     const np=bestNamePhone(deals,contacts);
-    box.innerHTML=chatButton(np.name,np.phone,'chatBoxLookup')
+    box.innerHTML=chatButton(np.name,np.phone,'chatBoxLookup',np.psid)
       +(deals.length?`<h3 style="font-size:15px;margin:6px 0">Deals (${deals.length})</h3>`+deals.map(d=>recordCard(d,'deal')).join(''):'')
       +(contacts.length?`<h3 style="font-size:15px;margin:14px 0 6px">Contacts (${contacts.length})</h3>`+contacts.map(c=>recordCard(c,'contact')).join(''):'');
   }catch(err){ m.className='msg err'; m.textContent='Error: '+err.message+' (check webhook URL, token and CORS).'; }
@@ -600,7 +602,7 @@ async function runPhotoCheck(){
       }
     });
     const np=bestNamePhone(data.deals,data.contacts);
-    html+=chatButton(np.name||p.name,np.phone||(p.phone||'').replace(/\D/g,'').slice(-10),'chatBoxCheck');
+    html+=chatButton(np.name||p.name,np.phone||(p.phone||'').replace(/\D/g,'').slice(-10),'chatBoxCheck',np.psid);
     html+=(data.deals||[]).map(d=>recordCard(d,'deal')).join('')+(data.contacts||[]).map(c=>recordCard(c,'contact')).join('');
     box.innerHTML=html;
   }catch(err){ m.className='msg err'; m.textContent='Error: '+err.message; }

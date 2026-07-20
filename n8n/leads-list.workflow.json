@@ -136,17 +136,29 @@
       }
     },
     {
+      "name": "Build Chat Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        -620
+      ],
+      "parameters": {
+        "jsCode": "// Запрос переписки: если есть PSID клиента (ID_Manychat из Zoho) — прямой запрос\n// его диалога; иначе перебор последних тредов inbox с пагинацией.\nconst q = $json.query || {};\nconst psid = String(q.chat_psid || '').replace(/\\D/g, '');\nconst base = 'https://graph.facebook.com/v25.0/102435125727901/conversations?fields=id,updated_time,messages.limit(30){message,from,created_time}';\nconst psidMode = psid.length >= 10;\nconst chatUrl = psidMode ? `${base}&user_id=${psid}&limit=5` : `${base}&limit=100`;\nreturn [{ json: { chatUrl, psidMode } }];\n"
+      }
+    },
+    {
       "name": "Meta: FB Conversations",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        560,
+        620,
         -620
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
       "parameters": {
-        "url": "https://graph.facebook.com/v25.0/102435125727901/conversations?fields=id,updated_time,messages.limit(30){message,from,created_time}&limit=50",
+        "url": "={{ $json.chatUrl }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -157,7 +169,18 @@
           ]
         },
         "options": {
-          "timeout": 30000
+          "timeout": 30000,
+          "pagination": {
+            "pagination": {
+              "paginationMode": "responseContainsNextURL",
+              "nextURL": "={{ $response.body.paging ? ($response.body.paging.next || '') : '' }}",
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.paging || !$response.body.paging.next }}",
+              "limitPagesFetched": true,
+              "maxRequests": 6,
+              "requestInterval": 150
+            }
+          }
         }
       }
     },
@@ -170,7 +193,7 @@
         -620
       ],
       "parameters": {
-        "jsCode": "// Поиск переписки лида в Facebook Page Inbox (механика Meta AI Chat MAIN):\n// совпадение по телефону (последние 10 цифр в тексте переписки) или по имени клиента.\nconst resp = $input.first().json || {};\nconst q = $('Webhook').first().json.query || {};\nconst PAGE_ID = '102435125727901';\n\nlet error = '';\nif (resp.error) {\n  const e = resp.error;\n  error = 'Meta: ' + String(e.message || e.description || JSON.stringify(e)).slice(0, 250);\n  if (/access token|OAuth/i.test(error)) error += ' — check the META_PAGE_TOKEN variable in n8n';\n}\nconst convs = Array.isArray(resp.data) ? resp.data : [];\nconst name = String(q.chat || '').trim().toLowerCase();\nconst phone10 = String(q.chat_phone || '').replace(/\\D/g, '').slice(-10);\n\nconst matches = [];\nfor (const conv of convs) {\n  const msgs = ((conv.messages && conv.messages.data) || [])\n    .slice()\n    .sort((a, b) => new Date(a.created_time) - new Date(b.created_time));\n  let customerName = '';\n  let joined = '';\n  for (const m of msgs) {\n    if (m.from && m.from.id !== PAGE_ID && m.from.name && !customerName) customerName = m.from.name;\n    joined += ' ' + (m.message || '');\n  }\n  const digitsInText = joined.replace(/\\D/g, '');\n  const phoneHit = phone10.length === 10 && digitsInText.includes(phone10);\n  const cn = customerName.toLowerCase();\n  const nameHit = !!name && !!cn && (cn.includes(name) || name.includes(cn));\n  if (!phoneHit && !nameHit) continue;\n  matches.push({\n    conversation_id: conv.id,\n    updated_time: conv.updated_time || '',\n    customer: customerName,\n    matched_by: phoneHit ? 'phone' : 'name',\n    messages: msgs.filter(m => (m.message || '').trim()).map(m => ({\n      time: m.created_time || '',\n      from: (m.from && m.from.id === PAGE_ID) ? 'business' : 'customer',\n      name: (m.from && m.from.name) || '',\n      text: m.message,\n    })),\n  });\n}\nmatches.sort((a, b) => String(b.updated_time).localeCompare(String(a.updated_time)));\n\nreturn [{\n  json: {\n    ok: !error,\n    error,\n    platform: 'facebook',\n    query: { name: String(q.chat || ''), phone: phone10 },\n    found: matches.length,\n    conversations: matches.slice(0, 3),\n  },\n}];\n"
+        "jsCode": "// Поиск переписки лида в Facebook Page Inbox.\n// Вход: одна или несколько страниц ответа Graph API (нода с пагинацией).\n// Совпадение: PSID-режим (диалог запрошен напрямую), телефон в тексте, или имя клиента.\nconst items = $input.all();\nconst q = $('Webhook').first().json.query || {};\nconst psidMode = $('Build Chat Request').first().json.psidMode === true;\nconst PAGE_ID = '102435125727901';\n\nlet error = '';\nlet convs = [];\nfor (const it of items) {\n  const r = it.json || {};\n  if (r.error) {\n    const e = r.error;\n    error = 'Meta: ' + String(e.message || e.description || JSON.stringify(e)).slice(0, 250);\n    if (/access token|OAuth/i.test(error)) error += ' — check the META_PAGE_TOKEN variable in n8n';\n    continue;\n  }\n  if (Array.isArray(r.data)) convs = convs.concat(r.data);\n}\n\nconst name = String(q.chat || '').trim().toLowerCase();\nconst phone10 = String(q.chat_phone || '').replace(/\\D/g, '').slice(-10);\n\nconst matches = [];\nfor (const conv of convs) {\n  const msgs = ((conv.messages && conv.messages.data) || [])\n    .slice()\n    .sort((a, b) => new Date(a.created_time) - new Date(b.created_time));\n  let customerName = '';\n  let joined = '';\n  for (const m of msgs) {\n    if (m.from && m.from.id !== PAGE_ID && m.from.name && !customerName) customerName = m.from.name;\n    joined += ' ' + (m.message || '');\n  }\n  const digitsInText = joined.replace(/\\D/g, '');\n  const phoneHit = phone10.length === 10 && digitsInText.includes(phone10);\n  const cn = customerName.toLowerCase();\n  const nameHit = !!name && !!cn && (cn.includes(name) || name.includes(cn));\n  if (!psidMode && !phoneHit && !nameHit) continue;\n  matches.push({\n    conversation_id: conv.id,\n    updated_time: conv.updated_time || '',\n    customer: customerName,\n    matched_by: psidMode ? 'profile id' : (phoneHit ? 'phone' : 'name'),\n    messages: msgs.filter(m => (m.message || '').trim()).map(m => ({\n      time: m.created_time || '',\n      from: (m.from && m.from.id === PAGE_ID) ? 'business' : 'customer',\n      name: (m.from && m.from.name) || '',\n      text: m.message,\n    })),\n  });\n}\nmatches.sort((a, b) => String(b.updated_time).localeCompare(String(a.updated_time)));\n\nreturn [{\n  json: {\n    ok: !error,\n    error,\n    platform: 'facebook',\n    searched_threads: convs.length,\n    query: { name: String(q.chat || ''), phone: phone10, psid_mode: psidMode },\n    found: matches.length,\n    conversations: matches.slice(0, 3),\n  },\n}];\n"
       }
     },
     {
@@ -835,7 +858,7 @@
       "main": [
         [
           {
-            "node": "Meta: FB Conversations",
+            "node": "Build Chat Request",
             "type": "main",
             "index": 0
           }
@@ -843,6 +866,17 @@
         [
           {
             "node": "Sheet Mode?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Chat Request": {
+      "main": [
+        [
+          {
+            "node": "Meta: FB Conversations",
             "type": "main",
             "index": 0
           }
