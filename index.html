@@ -19,7 +19,7 @@ nav button.active{background:var(--acc);border-color:var(--acc)}
 .stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 16px;min-width:110px;flex:1 1 110px;max-width:210px}
 .stat b{font-size:22px;display:block}
 .toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
-input,select,textarea{background:#0b1224;color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:9px 11px;font:inherit;width:100%}
+input,select,textarea{background:#0b1224;color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:9px 11px;font:inherit;font-size:16px;width:100%}
 input::placeholder,textarea::placeholder{color:#5f708f}
 .toolbar input{max-width:240px}
 .toolbar select{width:auto;max-width:190px}
@@ -49,7 +49,16 @@ label.fld span em{color:var(--errink);font-style:normal}
 code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;padding:1px 5px;border-radius:5px;font-size:12.5px}
 .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;border:1px solid var(--line);background:#0e2233;color:#7fd3ff}
 .tag{display:inline-block;padding:1px 8px;border-radius:12px;font-size:11.5px;border:1px solid var(--ok);background:#0c3320;color:var(--okink)}
-@media(max-width:640px){.grid{grid-template-columns:1fr}.toolbar input{max-width:none;flex:1 1 100%}.toolbar select{max-width:none;flex:1 1 45%}}
+.btn,nav button,.seg button,label.btn{touch-action:manipulation;-webkit-tap-highlight-color:rgba(91,140,255,.25)}
+@media(max-width:640px){
+  .grid{grid-template-columns:1fr}
+  .toolbar input{max-width:none;flex:1 1 100%}
+  .toolbar select{max-width:none;flex:1 1 45%}
+  .btn,nav button{min-height:44px;padding:11px 16px;font-size:16px}
+  .seg button{min-height:44px;padding:11px 13px;font-size:15px}
+  .toolbar .btn{flex:1 1 45%}
+  textarea{min-height:70px}
+}
 </style></head>
 <body><div class="wrap">
 
@@ -207,8 +216,12 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
       <input id="cfgToken" type="password" placeholder="DASHBOARD_API_KEY value from n8n" autocomplete="off"></label>
     <label class="fld" style="max-width:220px"><span>Report row limit (1–200)</span>
       <input id="cfgLimit" type="number" min="1" max="200" placeholder="200"></label>
-    <button class="btn" onclick="saveCfg()">Save</button>
-    <span class="muted" id="cfgSaved" style="margin-left:10px;font-size:13px"></span>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <button class="btn" onclick="saveCfg()">Save</button>
+      <button class="btn ghost" onclick="copySetupLink()">📱 Copy setup link for phone</button>
+      <span class="muted" id="cfgSaved" style="font-size:13px"></span>
+    </div>
+    <div class="note" style="margin-top:12px">Settings live only in this browser. To set up your phone (or any other device) in one tap: press “Copy setup link”, send it to yourself (iMessage/WhatsApp/email) and open it on the phone — the URLs and token will be applied automatically.</div>
     <div class="note" style="margin-top:16px">
       Settings are stored only in this browser (localStorage) and never committed to the repository.
       For workflow import, Zoho / Google Sheets credentials and <code>DASHBOARD_API_KEY</code> setup, see <code>README.md</code> in the repo.
@@ -220,6 +233,25 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
 // ---------- config (persisted in localStorage) ----------
 const LS='leadsDashCfg';
 let cfg=JSON.parse(localStorage.getItem(LS)||'{}');
+// Настроечная ссылка: #cfg=<base64url JSON> — применяем и убираем из адреса
+(function(){
+  const m=location.hash.match(/#cfg=([A-Za-z0-9\-_]+)/);
+  if(!m) return;
+  try{
+    const json=decodeURIComponent(escape(atob(m[1].replace(/-/g,'+').replace(/_/g,'/'))));
+    cfg=Object.assign({},cfg,JSON.parse(json));
+    localStorage.setItem(LS,JSON.stringify(cfg));
+    history.replaceState(null,'',location.pathname+location.search);
+  }catch(e){}
+})();
+function copySetupLink(){
+  const payload=btoa(unescape(encodeURIComponent(JSON.stringify({create:cfg.create||'',report:cfg.report||'',token:cfg.token||'',limit:cfg.limit||''}))))
+    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  const link=location.origin+location.pathname+'#cfg='+payload;
+  const done=()=>{const s=document.getElementById('cfgSaved');s.textContent='✓ link copied — open it on the phone';setTimeout(()=>s.textContent='',4000);};
+  if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(done,()=>prompt('Copy this link:',link));
+  else prompt('Copy this link:',link);
+}
 function saveCfg(){
   cfg={create:cfgCreate.value.trim(),report:cfgReport.value.trim(),token:cfgToken.value.trim(),limit:cfgLimit.value.trim()};
   localStorage.setItem(LS,JSON.stringify(cfg));
