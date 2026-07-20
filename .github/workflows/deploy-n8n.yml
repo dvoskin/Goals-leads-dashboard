@@ -22,6 +22,11 @@ jobs:
         env:
           N8N_URL: https://dvoskin.app.n8n.cloud
           N8N_KEY: ${{ secrets.N8N_API_KEY }}
+          # Необязательные: если секрет задан в GitHub, скрипт создаст/обновит
+          # одноимённую переменную в n8n (Variables) при деплое.
+          DASHBOARD_API_KEY: ${{ secrets.DASHBOARD_API_KEY }}
+          META_PAGE_TOKEN: ${{ secrets.META_PAGE_TOKEN }}
+          RC_JWT_ASSERTION: ${{ secrets.RC_JWT_ASSERTION }}
         run: |
           if [ -z "$N8N_KEY" ]; then
             echo "::error::Repository secret N8N_API_KEY is not set. Add it in Settings → Secrets and variables → Actions."
