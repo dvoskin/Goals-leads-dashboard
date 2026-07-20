@@ -27,7 +27,11 @@
 
 ## 1. Импорт workflow в n8n
 
-### Вариант А: автоматически через n8n API
+### Вариант 0: автопилот через GitHub Actions (рекомендуется)
+
+Один раз добавьте секрет: GitHub → репозиторий → **Settings → Secrets and variables → Actions → New repository secret** → имя `N8N_API_KEY`, значение — ключ из n8n (Settings → n8n API). После этого workflow `.github/workflows/deploy-n8n.yml` будет **автоматически** заливать изменения `n8n/*.workflow.json` в n8n при каждом push (или вручную: Actions → Deploy n8n workflows → Run workflow).
+
+### Вариант А: вручную через n8n API с компьютера
 
 ```bash
 export N8N_URL="https://dvoskin.app.n8n.cloud"

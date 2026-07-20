@@ -1,0 +1,30 @@
+name: Deploy n8n workflows
+
+# Автопилот: при каждом изменении workflow-файлов заливает их в n8n через API —
+# ручной запуск скрипта в терминале больше не нужен.
+# Требуется один секрет репозитория: N8N_API_KEY
+# (GitHub → Settings → Secrets and variables → Actions → New repository secret).
+
+on:
+  push:
+    branches: [main, claude/lead-dashboard-github-pages-2f1ym6]
+    paths:
+      - 'n8n/*.workflow.json'
+      - 'scripts/deploy-n8n.sh'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy workflows to n8n
+        env:
+          N8N_URL: https://dvoskin.app.n8n.cloud
+          N8N_KEY: ${{ secrets.N8N_API_KEY }}
+        run: |
+          if [ -z "$N8N_KEY" ]; then
+            echo "::error::Repository secret N8N_API_KEY is not set. Add it in Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          ./scripts/deploy-n8n.sh
