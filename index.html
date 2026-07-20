@@ -121,12 +121,15 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
   </div>
   <div class="card">
     <h2 style="margin-top:0;font-size:18px">📷 Check a lead by photo</h2>
-    <p class="muted" style="margin:0 0 10px;font-size:13px">Upload a photo of the lead's message or form — AI reads it, finds the lead in Zoho and compares the Best Contact Time. If it differs, you can update Zoho in one click.</p>
+    <p class="muted" style="margin:0 0 10px;font-size:13px">Get a photo of the lead's message or form — AI reads it, finds the lead in Zoho and compares the Best Contact Time. If it differs, you can update Zoho in one click.</p>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <label class="btn ghost" style="cursor:pointer">📷 Choose photo<input type="file" id="checkPhoto" accept="image/*" style="display:none" onchange="onCheckPhoto(this)"></label>
+      <label class="btn ghost" style="cursor:pointer">📷 Photo / gallery<input type="file" id="checkPhoto" accept="image/*" style="display:none" onchange="onCheckPhoto(this)"></label>
+      <label class="btn ghost" style="cursor:pointer">📸 Camera<input type="file" id="checkCamera" accept="image/*" capture="environment" style="display:none" onchange="onCheckPhoto(this)"></label>
+      <button class="btn ghost" id="checkScreenBtn" onclick="captureScreenTo('check')">🖥 Screenshot a window</button>
       <img id="checkPhotoPreview" style="display:none;max-height:56px;border-radius:8px;border:1px solid var(--line)">
       <button class="btn" id="checkBtn" onclick="runPhotoCheck()" disabled>Find in Zoho</button>
     </div>
+    <p class="muted" id="checkPasteHint" style="margin:8px 0 0;font-size:12.5px">Tip: you can also just press <code>Cmd/Ctrl+V</code> here to paste a screenshot from the clipboard.</p>
     <div class="msg" id="checkMsg"></div>
     <div id="checkResults" style="margin-top:14px"></div>
   </div>
@@ -164,6 +167,7 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
       <textarea id="pasteText" rows="7" placeholder="Kale Walker&#10;2149180251&#10;75126&#10;call now"></textarea></label>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <label class="btn ghost" style="cursor:pointer">📷 Attach photo<input type="file" id="pastePhoto" accept="image/*" style="display:none" onchange="onPastePhoto(this)"></label>
+      <button class="btn ghost" onclick="captureScreenTo('paste')">🖥 Screenshot a window</button>
       <span id="pastePhotoInfo" class="muted" style="font-size:12.5px"></span>
       <img id="pastePhotoPreview" style="display:none;max-height:56px;border-radius:8px;border:1px solid var(--line)">
       <button class="btn ghost" id="pastePhotoClear" style="display:none" onclick="clearPastePhoto()">✕ Remove photo</button>
@@ -595,16 +599,79 @@ async function runLookup(){
 
 // ---------- check lead by photo ----------
 let checkPhotoData=null;
+function setCheckPhoto(data){
+  checkPhotoData=data;
+  const prev=document.getElementById('checkPhotoPreview');
+  prev.src=data.dataUrl; prev.style.display='';
+  document.getElementById('checkBtn').disabled=false;
+}
 async function onCheckPhoto(inp){
   const m=document.getElementById('checkMsg'); m.className='msg'; m.textContent='';
   if(!inp.files||!inp.files[0]) return;
-  try{
-    checkPhotoData=await compressImage(inp.files[0]);
-    const prev=document.getElementById('checkPhotoPreview');
-    prev.src=checkPhotoData.dataUrl; prev.style.display='';
-    document.getElementById('checkBtn').disabled=false;
-  }catch(e){ checkPhotoData=null; m.className='msg err'; m.textContent=e.message; }
+  try{ setCheckPhoto(await compressImage(inp.files[0])); }
+  catch(e){ checkPhotoData=null; m.className='msg err'; m.textContent=e.message; }
 }
+// Скрин другого окна: браузер показывает выбор окна/экрана, снимаем один кадр
+function shrinkCanvas(src){
+  const MAX=1600;
+  let w=src.width,h=src.height;
+  if(Math.max(w,h)>MAX){ const k=MAX/Math.max(w,h); w=Math.round(w*k); h=Math.round(h*k); }
+  const c=document.createElement('canvas'); c.width=w; c.height=h;
+  c.getContext('2d').drawImage(src,0,0,w,h);
+  const dataUrl=c.toDataURL('image/jpeg',0.85);
+  return {b64:dataUrl.split(',')[1],mime:'image/jpeg',dataUrl};
+}
+async function captureScreenTo(target){
+  const m=document.getElementById(target==='check'?'checkMsg':'pasteMsg'); m.className='msg'; m.textContent='';
+  if(!(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia)){
+    m.className='msg err'; m.textContent='Window capture is not supported in this browser (works on desktop Chrome/Edge/Safari). Use Cmd/Ctrl+V paste instead.'; return;
+  }
+  let stream=null;
+  try{
+    stream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});
+    const video=document.createElement('video');
+    video.srcObject=stream; video.muted=true;
+    await video.play();
+    await new Promise(r=>{ if(video.readyState>=2) r(); else video.onloadeddata=r; });
+    await new Promise(r=>setTimeout(r,400));
+    const c=document.createElement('canvas');
+    c.width=video.videoWidth; c.height=video.videoHeight;
+    c.getContext('2d').drawImage(video,0,0);
+    const data=shrinkCanvas(c);
+    if(target==='check') setCheckPhoto(data); else setPastePhoto(data);
+    m.className='msg ok'; m.textContent='✓ Window captured — press “'+(target==='check'?'Find in Zoho':'Parse & Create in Zoho')+'”.';
+  }catch(e){
+    if(e&&e.name==='NotAllowedError'){ m.className='msg'; m.textContent=''; }
+    else{ m.className='msg err'; m.textContent='Capture failed: '+e.message; }
+  }finally{
+    if(stream) stream.getTracks().forEach(t=>t.stop());
+  }
+}
+// Вставка скриншота из буфера (Cmd/Ctrl+V) — уходит в активную вкладку
+document.addEventListener('paste',async e=>{
+  const items=(e.clipboardData&&e.clipboardData.items)||[];
+  for(const it of items){
+    if(it.type&&it.type.startsWith('image/')){
+      const file=it.getAsFile();
+      if(!file) continue;
+      e.preventDefault();
+      try{
+        const data=await compressImage(file);
+        const onAdd=document.getElementById('tab-add').style.display!=='none';
+        if(onAdd){
+          setPastePhoto(data);
+          const m=document.getElementById('pasteMsg'); m.className='msg ok'; m.textContent='✓ Screenshot pasted — press “Parse & Create in Zoho”.';
+        }else{
+          document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.tab==='lookup'));
+          ['report','lookup','sheets','add','settings'].forEach(t=>document.getElementById('tab-'+t).style.display=t==='lookup'?'':'none');
+          setCheckPhoto(data);
+          const m=document.getElementById('checkMsg'); m.className='msg ok'; m.textContent='✓ Screenshot pasted — press “Find in Zoho”.';
+        }
+      }catch(err){}
+      break;
+    }
+  }
+});
 async function runPhotoCheck(){
   const m=document.getElementById('checkMsg'); m.className='msg'; m.textContent='';
   const box=document.getElementById('checkResults'); box.innerHTML='';
@@ -735,16 +802,18 @@ function compressImage(file){
   });
 }
 let pastePhotoData=null;
+function setPastePhoto(data){
+  pastePhotoData=data;
+  const prev=document.getElementById('pastePhotoPreview');
+  prev.src=data.dataUrl; prev.style.display='';
+  document.getElementById('pastePhotoClear').style.display='';
+  document.getElementById('pastePhotoInfo').textContent=Math.round(data.b64.length*0.75/1024)+' KB';
+}
 async function onPastePhoto(inp){
   const info=document.getElementById('pastePhotoInfo');
   if(!inp.files||!inp.files[0]) return;
-  try{
-    pastePhotoData=await compressImage(inp.files[0]);
-    const prev=document.getElementById('pastePhotoPreview');
-    prev.src=pastePhotoData.dataUrl; prev.style.display='';
-    document.getElementById('pastePhotoClear').style.display='';
-    info.textContent=Math.round(pastePhotoData.b64.length*0.75/1024)+' KB';
-  }catch(e){ pastePhotoData=null; info.textContent=e.message; }
+  try{ setPastePhoto(await compressImage(inp.files[0])); }
+  catch(e){ pastePhotoData=null; info.textContent=e.message; }
 }
 function clearPastePhoto(){
   pastePhotoData=null;
