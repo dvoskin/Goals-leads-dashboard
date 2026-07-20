@@ -796,11 +796,112 @@
       }
     },
     {
+      "name": "RC: Mint Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1880,
+        80
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "https://platform.ringcentral.com/restapi/oauth/token",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "urn:ietf:params:oauth:grant-type:jwt-bearer"
+            },
+            {
+              "name": "assertion",
+              "value": "={{ $vars.RC_JWT_ASSERTION || $env.RC_JWT_ASSERTION || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "NGzTKetSf4HMBiX7",
+          "name": "RingCentral Basic"
+        }
+      }
+    },
+    {
+      "name": "Prep RC Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2060,
+        80
+      ],
+      "parameters": {
+        "jsCode": "// Готовим запрос к RingCentral message-store: окно от самого старого лида в отчёте\nconst mint = $input.first().json || {};\nconst mr = $('Map Rows').first().json;\nlet rcError = '';\nif (!mint.access_token) {\n  const e = mint.error || mint;\n  rcError = 'RC auth: ' + String(e.message || e.error_description || (typeof e === 'string' ? e : JSON.stringify(e))).slice(0, 200);\n  if (/invalid_grant|assertion|400/i.test(rcError)) rcError += ' — check the RC_JWT_ASSERTION variable in n8n';\n}\nlet oldest = null;\nfor (const l of (mr.leads || [])) {\n  const dt = DateTime.fromFormat(String(l.added || ''), 'yyyy-MM-dd HH:mm', { zone: 'America/New_York' });\n  if (dt.isValid && (!oldest || dt < oldest)) oldest = dt;\n}\nconst dateFrom = (oldest || DateTime.now().minus({ days: 7 })).minus({ hours: 1 }).toUTC().toISO({ suppressMilliseconds: true });\nreturn [{\n  json: {\n    rcError,\n    token: mint.access_token || '',\n    url: 'https://platform.ringcentral.com/restapi/v1.0/account/~/extension/~/message-store?messageType=SMS&direction=Outbound&perPage=250&dateFrom=' + encodeURIComponent(dateFrom),\n  },\n}];\n"
+      }
+    },
+    {
+      "name": "RC: Message Store",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        80
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "url": "={{ $('Prep RC Query').item.json.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Prep RC Query').item.json.token }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "pagination": {
+            "pagination": {
+              "paginationMode": "responseContainsNextURL",
+              "nextURL": "={{ $response.body.navigation && $response.body.navigation.nextPage ? ($response.body.navigation.nextPage.uri || '') : '' }}",
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.navigation || !$response.body.navigation.nextPage || !$response.body.navigation.nextPage.uri }}",
+              "limitPagesFetched": true,
+              "maxRequests": 4,
+              "requestInterval": 150
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Mark Welcome",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        80
+      ],
+      "parameters": {
+        "jsCode": "// Помечаем лидов, которым был отправлен исходящий SMS через RingCentral (welcome)\nconst items = $input.all();\nconst mr = $('Map Rows').first().json;\nconst prep = $('Prep RC Query').first().json;\nlet rcErr = prep.rcError || '';\n\nconst sentTo = new Set();\nfor (const it of items) {\n  const r = it.json || {};\n  if (r.error) {\n    if (!rcErr) {\n      const e = r.error;\n      rcErr = 'RC: ' + String(e.message || e.description || JSON.stringify(e)).slice(0, 150);\n    }\n    continue;\n  }\n  for (const rec of (r.records || [])) {\n    if (rec.direction !== 'Outbound') continue;\n    for (const to of (rec.to || [])) {\n      const d = String(to.phoneNumber || '').replace(/\\D/g, '');\n      if (d.length >= 10) sentTo.add(d.slice(-10));\n    }\n  }\n}\n\nconst leads = (mr.leads || []).map(l => {\n  const p = String(l.phone || '').replace(/\\D/g, '');\n  const p10 = p.length >= 10 ? p.slice(-10) : '';\n  return { ...l, welcome_sms: !!(p10 && sentTo.has(p10)) };\n});\n\nlet notice = mr.notice || '';\nif (rcErr) notice = (notice ? notice + ' · ' : '') + 'Welcome-SMS check unavailable (' + rcErr + ')';\n\nreturn [{ json: { ok: mr.ok, error: mr.error, notice, count: leads.length, leads } }];\n"
+      }
+    },
+    {
       "name": "Respond 200",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        1880,
+        2620,
         80
       ],
       "parameters": {
@@ -1150,6 +1251,50 @@
       ]
     },
     "Map Rows": {
+      "main": [
+        [
+          {
+            "node": "RC: Mint Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RC: Mint Token": {
+      "main": [
+        [
+          {
+            "node": "Prep RC Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep RC Query": {
+      "main": [
+        [
+          {
+            "node": "RC: Message Store",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RC: Message Store": {
+      "main": [
+        [
+          {
+            "node": "Mark Welcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Welcome": {
       "main": [
         [
           {

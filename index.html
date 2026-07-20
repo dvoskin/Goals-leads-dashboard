@@ -297,19 +297,21 @@ let viewMode='today';
 
 // ---------- helpers ----------
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const COL_ORDER=['added','first_name','last_name','phone','email','city','zip','contact_time','source','status','deal_stage','via','deal_id'];
-const COL_LABEL={added:'Added',first_name:'First Name',last_name:'Last Name',phone:'Phone',email:'Email',city:'City',zip:'ZIP',contact_time:'Call Time',source:'Source',status:'Status',deal_stage:'Stage',via:'Channel',deal_id:'Deal ID'};
-const HIDDEN_COLS=['via_dashboard'];
+const COL_ORDER=['added','first_name','last_name','phone','email','city','zip','contact_time','source','status','deal_stage','welcome','via','deal_id'];
+const COL_LABEL={added:'Added',first_name:'First Name',last_name:'Last Name',phone:'Phone',email:'Email',city:'City',zip:'ZIP',contact_time:'Call Time',source:'Source',status:'Status',deal_stage:'Stage',welcome:'Welcome SMS',via:'Channel',deal_id:'Deal ID'};
+const HIDDEN_COLS=['via_dashboard','welcome_sms'];
 function cols(){
   const s=new Set(); rows.forEach(r=>Object.keys(r).forEach(k=>s.add(k)));
   HIDDEN_COLS.forEach(k=>s.delete(k));
   if(rows.some(r=>r.via_dashboard!==undefined)) s.add('via');
+  if(rows.some(r=>r.welcome_sms!==undefined)) s.add('welcome');
   const known=COL_ORDER.filter(k=>s.has(k));
   const extra=[...s].filter(k=>!COL_ORDER.includes(k));
   return known.concat(extra);
 }
 function cellValue(r,k){
   if(k==='via') return r.via_dashboard?'Dashboard':'';
+  if(k==='welcome') return r.welcome_sms?'✓ sent':'';
   return r[k];
 }
 function rowDate(r){ return String(r.added||r.date||r.created||''); }
@@ -385,6 +387,7 @@ function renderTable(){
   document.getElementById('tbody').innerHTML=data.map(r=>'<tr>'+c.map(k=>{
     const v=cellValue(r,k);
     if(k==='via'&&v) return `<td><span class="tag">Dashboard</span></td>`;
+    if(k==='welcome'&&v) return `<td><span class="tag" title="An outbound RingCentral SMS was sent to this lead">💬 sent</span></td>`;
     return `<td title="${esc(v)}">${esc(v)}</td>`;
   }).join('')+'</tr>').join('')
     || `<tr><td colspan="${c.length||1}" class="muted" style="padding:20px">No data</td></tr>`;

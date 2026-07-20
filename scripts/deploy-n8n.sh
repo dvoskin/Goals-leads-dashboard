@@ -79,6 +79,8 @@ create_var() { # name value
 [ -n "${DASHBOARD_API_KEY:-}" ] && create_var DASHBOARD_API_KEY "$DASHBOARD_API_KEY"
 # Токен страницы Facebook для подтяжки переписки (тот же, что в Meta AI Chat MAIN)
 [ -n "${META_PAGE_TOKEN:-}" ] && create_var META_PAGE_TOKEN "$META_PAGE_TOKEN"
+# RingCentral JWT assertion для проверки welcome-SMS (тот же, что в GPS — Inbound SMS)
+[ -n "${RC_JWT_ASSERTION:-}" ] && create_var RC_JWT_ASSERTION "$RC_JWT_ASSERTION"
 
 echo
 echo "Webhook-URL для вкладки «Настройки» дашборда:"
