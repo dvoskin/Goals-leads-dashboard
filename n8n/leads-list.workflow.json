@@ -102,6 +102,106 @@
       }
     },
     {
+      "name": "Chat Mode?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        340,
+        -520
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "chatmode-check-1",
+              "leftValue": "={{ ($json.query.chat || $json.query.chat_phone || '') }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "name": "Meta: FB Conversations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        -620
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "url": "https://graph.facebook.com/v25.0/102435125727901/conversations?fields=id,updated_time,messages.limit(30){message,from,created_time}&limit=50",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.META_PAGE_TOKEN || $env.META_PAGE_TOKEN || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      }
+    },
+    {
+      "name": "Match Chat",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        760,
+        -620
+      ],
+      "parameters": {
+        "jsCode": "// Поиск переписки лида в Facebook Page Inbox (механика Meta AI Chat MAIN):\n// совпадение по телефону (последние 10 цифр в тексте переписки) или по имени клиента.\nconst resp = $input.first().json || {};\nconst q = $('Webhook').first().json.query || {};\nconst PAGE_ID = '102435125727901';\n\nlet error = '';\nif (resp.error) {\n  const e = resp.error;\n  error = 'Meta: ' + String(e.message || e.description || JSON.stringify(e)).slice(0, 250);\n  if (/access token|OAuth/i.test(error)) error += ' — check the META_PAGE_TOKEN variable in n8n';\n}\nconst convs = Array.isArray(resp.data) ? resp.data : [];\nconst name = String(q.chat || '').trim().toLowerCase();\nconst phone10 = String(q.chat_phone || '').replace(/\\D/g, '').slice(-10);\n\nconst matches = [];\nfor (const conv of convs) {\n  const msgs = ((conv.messages && conv.messages.data) || [])\n    .slice()\n    .sort((a, b) => new Date(a.created_time) - new Date(b.created_time));\n  let customerName = '';\n  let joined = '';\n  for (const m of msgs) {\n    if (m.from && m.from.id !== PAGE_ID && m.from.name && !customerName) customerName = m.from.name;\n    joined += ' ' + (m.message || '');\n  }\n  const digitsInText = joined.replace(/\\D/g, '');\n  const phoneHit = phone10.length === 10 && digitsInText.includes(phone10);\n  const cn = customerName.toLowerCase();\n  const nameHit = !!name && !!cn && (cn.includes(name) || name.includes(cn));\n  if (!phoneHit && !nameHit) continue;\n  matches.push({\n    conversation_id: conv.id,\n    updated_time: conv.updated_time || '',\n    customer: customerName,\n    matched_by: phoneHit ? 'phone' : 'name',\n    messages: msgs.filter(m => (m.message || '').trim()).map(m => ({\n      time: m.created_time || '',\n      from: (m.from && m.from.id === PAGE_ID) ? 'business' : 'customer',\n      name: (m.from && m.from.name) || '',\n      text: m.message,\n    })),\n  });\n}\nmatches.sort((a, b) => String(b.updated_time).localeCompare(String(a.updated_time)));\n\nreturn [{\n  json: {\n    ok: !error,\n    error,\n    platform: 'facebook',\n    query: { name: String(q.chat || ''), phone: phone10 },\n    found: matches.length,\n    conversations: matches.slice(0, 3),\n  },\n}];\n"
+      }
+    },
+    {
+      "name": "Respond Chat",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        960,
+        -620
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
       "name": "Sheet Mode?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.3,
@@ -717,7 +817,7 @@
       "main": [
         [
           {
-            "node": "Sheet Mode?",
+            "node": "Chat Mode?",
             "type": "main",
             "index": 0
           }
@@ -725,6 +825,46 @@
         [
           {
             "node": "Respond 401",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat Mode?": {
+      "main": [
+        [
+          {
+            "node": "Meta: FB Conversations",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sheet Mode?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta: FB Conversations": {
+      "main": [
+        [
+          {
+            "node": "Match Chat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match Chat": {
+      "main": [
+        [
+          {
+            "node": "Respond Chat",
             "type": "main",
             "index": 0
           }

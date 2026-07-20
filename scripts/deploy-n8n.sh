@@ -66,15 +66,19 @@ check_auth
 deploy "$DIR/n8n/lead-create.workflow.json"
 deploy "$DIR/n8n/leads-list.workflow.json"
 
-if [ -n "${DASHBOARD_API_KEY:-}" ]; then
-  echo "≫ Пробую создать Variable DASHBOARD_API_KEY"
-  RESP="$(curl -sS -o /dev/null -w "%{http_code}" -X POST "${AUTH[@]}" \
-    -d "{\"key\":\"DASHBOARD_API_KEY\",\"value\":\"$DASHBOARD_API_KEY\"}" "$API/variables" || true)"
-  case "$RESP" in
+create_var() { # name value
+  local name="$1" value="$2" resp
+  echo "≫ Пробую создать Variable $name"
+  resp="$(curl -sS -o /dev/null -w "%{http_code}" -X POST "${AUTH[@]}" \
+    -d "{\"key\":\"$name\",\"value\":\"$value\"}" "$API/variables" || true)"
+  case "$resp" in
     2*) echo "  variable создана ✓" ;;
-    *)  echo "  не удалось (HTTP $RESP) — создайте вручную: Settings → Variables → DASHBOARD_API_KEY (нужен план с Variables), либо оставьте поле токена в дашборде пустым" ;;
+    *)  echo "  не удалось (HTTP $resp) — создайте вручную: Settings → Variables → $name" ;;
   esac
-fi
+}
+[ -n "${DASHBOARD_API_KEY:-}" ] && create_var DASHBOARD_API_KEY "$DASHBOARD_API_KEY"
+# Токен страницы Facebook для подтяжки переписки (тот же, что в Meta AI Chat MAIN)
+[ -n "${META_PAGE_TOKEN:-}" ] && create_var META_PAGE_TOKEN "$META_PAGE_TOKEN"
 
 echo
 echo "Webhook-URL для вкладки «Настройки» дашборда:"

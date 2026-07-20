@@ -411,9 +411,15 @@ async function submitLead(e){
 
 // ---------- lookup (search Zoho by phone or name) ----------
 const PRIORITY_FIELDS=['Deal_Name','Full_Name','First_Name','Last_Name','Phone','Email','Stage','Lead_Source','Contact_Name','Best_Contact_Time','Call_Scheduled_Date_Time','Client_Timezone','Created_Time','Modified_Time','Owner','Mailing_State','Mailing_Zip','Zip_Code','Language','Description'];
+const NOISE_FIELDS=['Exchange_Rate','Currency','Locked__s','Tag','Record_Image','Layout','Orchestration','Pathfinder','Change_Log_Time__s','Wizard','Days_Sales_Cycle_Duration','Sales_Cycle_Duration','Lead_Conversion_Time'];
+function isEmptyVal(v){
+  if(v===null||v===undefined) return true;
+  const s=String(v).trim();
+  return s===''||s==='null'||s==='false'||s==='0'||s==='0.0'||s==='-None-';
+}
 function recordCard(rec,kind){
   const title=rec.Deal_Name||rec.Full_Name||((rec.First_Name||'')+' '+(rec.Last_Name||'')).trim()||rec.id||'—';
-  const keys=Object.keys(rec).filter(k=>k!=='id');
+  const keys=Object.keys(rec).filter(k=>k!=='id'&&!NOISE_FIELDS.includes(k)&&!isEmptyVal(rec[k]));
   keys.sort((a,b)=>{
     const ia=PRIORITY_FIELDS.indexOf(a),ib=PRIORITY_FIELDS.indexOf(b);
     return (ia<0?999:ia)-(ib<0?999:ib)||a.localeCompare(b);
@@ -426,12 +432,66 @@ function recordCard(rec,kind){
       <span style="word-break:break-word;white-space:pre-wrap">${esc(v)}</span></div>`;
   }).join('');
   const zohoUrl=rec.id?`https://crm.zoho.com/crm/tab/${kind==='deal'?'Potentials':'Contacts'}/${esc(rec.id)}`:null;
+  const tz=String(rec.Client_Timezone||'ET');
+  const editor=(kind==='deal'&&rec.id)?`
+    <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <span class="muted" style="font-size:12.5px">📅 New call time:</span>
+      <input class="bct-input" placeholder='e.g. "tomorrow 3pm", "7/25 11:00am", "now"' style="max-width:250px">
+      <select class="bct-tz" style="width:auto">${['ET','CT','MT','PT','AKT','HT'].map(z=>`<option${z===tz?' selected':''}>${z}</option>`).join('')}</select>
+      <button class="btn" data-deal="${esc(rec.id)}" data-stage="${esc(rec.Stage||'')}" onclick="updateBctFromCard(this)">Update in Zoho</button>
+    </div>`:'';
   return `<div class="card" style="margin-bottom:12px">
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
       <b style="font-size:15.5px">${kind==='deal'?'💼':'👤'} ${esc(title)}</b>
       <span>${rec.Stage?`<span class="pill">${esc(rec.Stage)}</span>`:''}
       ${zohoUrl?` <a href="${zohoUrl}" target="_blank" rel="noopener" style="color:var(--acc);font-size:12.5px">open in Zoho ↗</a>`:''}</span>
-    </div>${rows}</div>`;
+    </div>${rows}${editor}</div>`;
+}
+async function updateBctFromCard(btn){
+  const wrap=btn.parentElement;
+  const val=(wrap.querySelector('.bct-input').value||'').trim();
+  const tz=wrap.querySelector('.bct-tz').value;
+  if(!val){ btn.textContent='Enter a time first'; setTimeout(()=>btn.textContent='Update in Zoho',1500); return; }
+  await updateBct(btn.dataset.deal,val,tz,btn.dataset.stage,btn);
+}
+// Chat button + rendering (Facebook page inbox via n8n)
+function chatButton(name,phone,boxId){
+  return `<div style="margin:6px 0 12px"><button class="btn ghost" data-name="${esc(name)}" data-phone="${esc(phone)}" data-box="${esc(boxId)}" onclick="loadMetaChat(this)">💬 Load Meta chat (Facebook)</button><div id="${esc(boxId)}"></div></div>`;
+}
+async function loadMetaChat(btn){
+  const box=document.getElementById(btn.dataset.box);
+  btn.disabled=true; const orig=btn.textContent; btn.textContent='Loading chat…';
+  try{
+    const u=new URL(cfg.report);
+    if(btn.dataset.name) u.searchParams.set('chat',btn.dataset.name);
+    if(btn.dataset.phone) u.searchParams.set('chat_phone',btn.dataset.phone);
+    const r=await fetch(u,{headers:apiHeaders()});
+    let data=null; try{ data=await r.json(); }catch(_){}
+    if(!r.ok||!data) throw new Error((data&&data.error)||('HTTP '+r.status));
+    if(data.ok===false) throw new Error(data.error||'chat fetch failed');
+    if(!data.found){ box.innerHTML='<div class="note">No Facebook conversation found for this lead (searched recent page inbox by phone and name).</div>'; return; }
+    box.innerHTML=data.conversations.map(c=>`
+      <div class="card" style="margin-top:10px">
+        <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+          <b>💬 ${esc(c.customer||'Conversation')}</b>
+          <span class="muted" style="font-size:12px">matched by ${esc(c.matched_by)} · updated ${esc(String(c.updated_time).slice(0,16).replace('T',' '))}</span>
+        </div>
+        ${c.messages.map(m=>`
+          <div style="display:flex;${m.from==='business'?'justify-content:flex-end':''};margin:4px 0">
+            <div style="max-width:78%;padding:7px 11px;border-radius:12px;font-size:13.5px;white-space:pre-wrap;word-break:break-word;${m.from==='business'?'background:#16305e;border:1px solid #2a4a86':'background:#0e1830;border:1px solid var(--line)'}">
+              ${esc(m.text)}
+              <div class="muted" style="font-size:10.5px;margin-top:3px">${esc(m.from==='business'?'Goals':(m.name||'Customer'))} · ${esc(String(m.time).slice(0,16).replace('T',' '))}</div>
+            </div>
+          </div>`).join('')}
+      </div>`).join('');
+  }catch(err){ box.innerHTML='<div class="msg err" style="display:block">Chat error: '+esc(err.message)+'</div>'; }
+  finally{ btn.disabled=false; btn.textContent=orig; }
+}
+function bestNamePhone(deals,contacts){
+  const c=(contacts&&contacts[0])||{}, d=(deals&&deals[0])||{};
+  const name=c.Full_Name||((c.First_Name||'')+' '+(c.Last_Name||'')).trim()||d.Deal_Name||'';
+  const phone=(c.Phone||d.Phone||'').replace(/\D/g,'').slice(-10);
+  return {name,phone};
 }
 async function runLookup(){
   const m=document.getElementById('lookupMsg'); m.className='msg'; m.textContent='';
@@ -449,7 +509,9 @@ async function runLookup(){
     const deals=data.deals||[], contacts=data.contacts||[];
     if(!deals.length&&!contacts.length){ m.className='msg err'; m.textContent='Nothing found in Zoho for "'+term+'".'; return; }
     m.className='msg ok'; m.textContent='Found: '+deals.length+' deal(s), '+contacts.length+' contact(s).';
-    box.innerHTML=(deals.length?`<h3 style="font-size:15px;margin:6px 0">Deals (${deals.length})</h3>`+deals.map(d=>recordCard(d,'deal')).join(''):'')
+    const np=bestNamePhone(deals,contacts);
+    box.innerHTML=chatButton(np.name,np.phone,'chatBoxLookup')
+      +(deals.length?`<h3 style="font-size:15px;margin:6px 0">Deals (${deals.length})</h3>`+deals.map(d=>recordCard(d,'deal')).join(''):'')
       +(contacts.length?`<h3 style="font-size:15px;margin:14px 0 6px">Contacts (${contacts.length})</h3>`+contacts.map(c=>recordCard(c,'contact')).join(''):'');
   }catch(err){ m.className='msg err'; m.textContent='Error: '+err.message+' (check webhook URL, token and CORS).'; }
   finally{ btn.disabled=false; btn.textContent='Search Zoho'; }
@@ -495,6 +557,8 @@ async function runPhotoCheck(){
           <button class="btn" style="margin-top:8px" onclick='updateBct("${esc(bm.deal_id)}",${JSON.stringify(p.contact_time_raw||'')},${JSON.stringify(p.timezone||'')},${JSON.stringify(bm.stage||'')},this)'>Set “${esc(bm.parsed_bct)}” in Zoho</button></div>`;
       }
     });
+    const np=bestNamePhone(data.deals,data.contacts);
+    html+=chatButton(np.name||p.name,np.phone||(p.phone||'').replace(/\D/g,'').slice(-10),'chatBoxCheck');
     html+=(data.deals||[]).map(d=>recordCard(d,'deal')).join('')+(data.contacts||[]).map(c=>recordCard(c,'contact')).join('');
     box.innerHTML=html;
   }catch(err){ m.className='msg err'; m.textContent='Error: '+err.message; }
