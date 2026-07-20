@@ -103,8 +103,8 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
 <section id="tab-lookup" style="display:none">
   <div class="card">
     <h2 style="margin-top:0;font-size:18px">🔍 Check a lead in Zoho</h2>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-      <input id="lookupTerm" placeholder="Phone or contact name… e.g. 6015651047 or Chandra Magee" style="max-width:420px" onkeydown="if(event.key==='Enter')runLookup()">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start">
+      <textarea id="lookupTerm" rows="2" placeholder="Phone, contact name, or paste the WHOLE lead text — the phone number will be detected automatically" style="max-width:520px" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();runLookup();}"></textarea>
       <button class="btn" id="lookupBtn" onclick="runLookup()">Search Zoho</button>
     </div>
     <div class="msg" id="lookupMsg"></div>
@@ -410,6 +410,37 @@ async function submitLead(e){
 }
 
 // ---------- lookup (search Zoho by phone or name) ----------
+// ZIP -> штат -> таймзона (та же таблица, что в n8n workflow)
+const ZIP_RANGES=[[5,5,'NY'],[6,9,'PR'],[10,27,'MA'],[28,29,'RI'],[30,38,'NH'],[39,49,'ME'],[50,59,'VT'],[60,69,'CT'],[70,89,'NJ'],[100,149,'NY'],[150,196,'PA'],[197,199,'DE'],[200,200,'DC'],[201,201,'VA'],[202,205,'DC'],[206,219,'MD'],[220,246,'VA'],[247,268,'WV'],[270,289,'NC'],[290,299,'SC'],[300,319,'GA'],[320,349,'FL'],[350,369,'AL'],[370,385,'TN'],[386,397,'MS'],[398,399,'GA'],[400,427,'KY'],[430,459,'OH'],[460,479,'IN'],[480,499,'MI'],[500,528,'IA'],[530,549,'WI'],[550,567,'MN'],[570,577,'SD'],[580,588,'ND'],[590,599,'MT'],[600,629,'IL'],[630,658,'MO'],[660,679,'KS'],[680,693,'NE'],[700,715,'LA'],[716,729,'AR'],[730,749,'OK'],[750,799,'TX'],[800,816,'CO'],[820,831,'WY'],[832,838,'ID'],[840,847,'UT'],[850,865,'AZ'],[870,884,'NM'],[885,885,'TX'],[889,898,'NV'],[900,961,'CA'],[967,968,'HI'],[970,979,'OR'],[980,994,'WA'],[995,999,'AK']];
+const STATE_TZ={ME:'ET',NH:'ET',VT:'ET',MA:'ET',RI:'ET',CT:'ET',NY:'ET',NJ:'ET',PA:'ET',DE:'ET',MD:'ET',DC:'ET',VA:'ET',WV:'ET',NC:'ET',SC:'ET',GA:'ET',FL:'ET',OH:'ET',MI:'ET',IN:'ET',KY:'ET',PR:'ET',WI:'CT',IL:'CT',MN:'CT',IA:'CT',MO:'CT',AR:'CT',LA:'CT',MS:'CT',AL:'CT',TN:'CT',TX:'CT',OK:'CT',KS:'CT',NE:'CT',SD:'CT',ND:'CT',MT:'MT',WY:'MT',CO:'MT',NM:'MT',ID:'MT',UT:'MT',AZ:'MT',CA:'PT',NV:'PT',OR:'PT',WA:'PT',AK:'AKT',HI:'HT'};
+function zipToTz(zip){
+  const z=String(zip||'').replace(/\D/g,'').slice(0,5);
+  if(z.length!==5) return '';
+  const p3=parseInt(z.slice(0,3),10);
+  const hit=ZIP_RANGES.find(r=>p3>=r[0]&&p3<=r[1]);
+  return hit?(STATE_TZ[hit[2]]||''):'';
+}
+// Извлечение телефона из произвольного текста (та же логика, что в n8n)
+function extractPhoneClient(text){
+  if(!text) return null;
+  const total=text.replace(/\D/g,'');
+  if(total.length===10) return total;
+  if(total.length===11&&total.startsWith('1')) return total.slice(1);
+  for(const line of text.split(/\n+/)){
+    const l=line.replace(/[a-zA-Z0-9._%+-]+@[^\s]+/g,' ');
+    const mm=l.match(/\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4}/);
+    if(mm){const d=mm[0].replace(/\D/g,'');if(d.length===10)return d;}
+    for(const tok of l.split(/[\s,]+/)){
+      const d=tok.replace(/\D/g,'');
+      if(d.length===5&&/^\d{5}$/.test(d))continue;
+      if(tok.includes('@'))continue;
+      if(/^\d{1,2}[\/.\-]\d{1,2}/.test(tok))continue;
+      if(d.length===10)return d;
+      if(d.length===11&&d.startsWith('1'))return d.slice(1);
+    }
+  }
+  return null;
+}
 const PRIORITY_FIELDS=['Deal_Name','Full_Name','First_Name','Last_Name','Phone','Email','Stage','Lead_Source','Contact_Name','Best_Contact_Time','Call_Scheduled_Date_Time','Client_Timezone','Created_Time','Modified_Time','Owner','Mailing_State','Mailing_Zip','Zip_Code','Language','Description'];
 const NOISE_FIELDS=['Exchange_Rate','Currency','Locked__s','Tag','Record_Image','Layout','Orchestration','Pathfinder','Change_Log_Time__s','Wizard','Days_Sales_Cycle_Duration','Sales_Cycle_Duration','Lead_Conversion_Time'];
 function isEmptyVal(v){
@@ -432,13 +463,19 @@ function recordCard(rec,kind){
       <span style="word-break:break-word;white-space:pre-wrap">${esc(v)}</span></div>`;
   }).join('');
   const zohoUrl=rec.id?`https://crm.zoho.com/crm/tab/${kind==='deal'?'Potentials':'Contacts'}/${esc(rec.id)}`:null;
+  const zip=String(rec.Zip_Code||rec.Mailing_Zip||'').replace(/\D/g,'').slice(0,5);
+  const zipTz=zipToTz(zip);
   const tz=String(rec.Client_Timezone||'ET');
+  // Есть ZIP -> таймзона вычисляется сама и показывается рядом; нет ZIP -> выпадающий список
+  const tzUi=zipTz
+    ?`<span class="pill" title="Timezone auto-detected from the lead's ZIP">ZIP ${esc(zip)} → ${esc(zipTz)}</span>`
+    :`<select class="bct-tz" style="width:auto" title="No ZIP on this lead — pick the timezone">${['ET','CT','MT','PT','AKT','HT'].map(z=>`<option${z===tz?' selected':''}>${z}</option>`).join('')}</select>`;
   const editor=(kind==='deal'&&rec.id)?`
     <div style="margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);display:flex;gap:8px;flex-wrap:wrap;align-items:center">
       <span class="muted" style="font-size:12.5px">📅 New call time:</span>
       <input class="bct-input" placeholder='e.g. "tomorrow 3pm", "7/25 11:00am", "now"' style="max-width:250px">
-      <select class="bct-tz" style="width:auto">${['ET','CT','MT','PT','AKT','HT'].map(z=>`<option${z===tz?' selected':''}>${z}</option>`).join('')}</select>
-      <button class="btn" data-deal="${esc(rec.id)}" data-stage="${esc(rec.Stage||'')}" onclick="updateBctFromCard(this)">Update in Zoho</button>
+      ${tzUi}
+      <button class="btn" data-deal="${esc(rec.id)}" data-stage="${esc(rec.Stage||'')}" data-zip="${esc(zip)}" data-tz="${esc(zipTz||'')}" onclick="updateBctFromCard(this)">Update in Zoho</button>
     </div>`:'';
   return `<div class="card" style="margin-bottom:12px">
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
@@ -450,9 +487,10 @@ function recordCard(rec,kind){
 async function updateBctFromCard(btn){
   const wrap=btn.parentElement;
   const val=(wrap.querySelector('.bct-input').value||'').trim();
-  const tz=wrap.querySelector('.bct-tz').value;
+  const sel=wrap.querySelector('.bct-tz');
+  const tz=btn.dataset.tz||(sel?sel.value:'ET');
   if(!val){ btn.textContent='Enter a time first'; setTimeout(()=>btn.textContent='Update in Zoho',1500); return; }
-  await updateBct(btn.dataset.deal,val,tz,btn.dataset.stage,btn);
+  await updateBct(btn.dataset.deal,val,tz,btn.dataset.stage,btn,btn.dataset.zip||'');
 }
 // Chat button + rendering (Facebook page inbox via n8n)
 function chatButton(name,phone,boxId){
@@ -496,9 +534,13 @@ function bestNamePhone(deals,contacts){
 async function runLookup(){
   const m=document.getElementById('lookupMsg'); m.className='msg'; m.textContent='';
   const box=document.getElementById('lookupResults'); box.innerHTML='';
-  const term=document.getElementById('lookupTerm').value.trim();
-  if(!term){ m.className='msg err'; m.textContent='Enter a phone number or a contact name.'; return; }
+  let term=document.getElementById('lookupTerm').value.trim();
+  if(!term){ m.className='msg err'; m.textContent='Enter a phone number, a name, or paste the lead text.'; return; }
   if(!cfg.report){ m.className='msg err'; m.textContent='Report webhook is not set — open Settings.'; return; }
+  // Из вставленного текста сами достаём телефон и ищем чистыми 10 цифрами (так хранит Zoho)
+  const detectedPhone=extractPhoneClient(term);
+  let searchNote='';
+  if(detectedPhone){ term=detectedPhone; searchNote='Detected phone '+detectedPhone+' — '; }
   const btn=document.getElementById('lookupBtn'); btn.disabled=true; btn.textContent='Searching…';
   try{
     const u=new URL(cfg.report); u.searchParams.set('lookup',term);
@@ -507,8 +549,8 @@ async function runLookup(){
     if(!r.ok||!data) throw new Error((data&&data.error)||('HTTP '+r.status));
     if(data.ok===false) throw new Error(data.error||'Zoho search failed');
     const deals=data.deals||[], contacts=data.contacts||[];
-    if(!deals.length&&!contacts.length){ m.className='msg err'; m.textContent='Nothing found in Zoho for "'+term+'".'; return; }
-    m.className='msg ok'; m.textContent='Found: '+deals.length+' deal(s), '+contacts.length+' contact(s).';
+    if(!deals.length&&!contacts.length){ m.className='msg err'; m.textContent=searchNote+'nothing found in Zoho for "'+term+'".'; return; }
+    m.className='msg ok'; m.textContent=searchNote+'found: '+deals.length+' deal(s), '+contacts.length+' contact(s).';
     const np=bestNamePhone(deals,contacts);
     box.innerHTML=chatButton(np.name,np.phone,'chatBoxLookup')
       +(deals.length?`<h3 style="font-size:15px;margin:6px 0">Deals (${deals.length})</h3>`+deals.map(d=>recordCard(d,'deal')).join(''):'')
@@ -554,7 +596,7 @@ async function runPhotoCheck(){
       }else{
         html+=`<div class="msg err" style="display:block">✗ Best Contact Time differs for “${esc(bm.deal_name)}” (stage: ${esc(bm.stage)})<br>
           Zoho: <b>${esc(bm.zoho_bct||'—')}</b> · Photo: <b>${esc(bm.parsed_bct||'—')}</b><br>
-          <button class="btn" style="margin-top:8px" onclick='updateBct("${esc(bm.deal_id)}",${JSON.stringify(p.contact_time_raw||'')},${JSON.stringify(p.timezone||'')},${JSON.stringify(bm.stage||'')},this)'>Set “${esc(bm.parsed_bct)}” in Zoho</button></div>`;
+          <button class="btn" style="margin-top:8px" onclick='updateBct("${esc(bm.deal_id)}",${JSON.stringify(p.contact_time_raw||'')},${JSON.stringify(p.timezone||'')},${JSON.stringify(bm.stage||'')},this,${JSON.stringify(p.zip||'')})'>Set “${esc(bm.parsed_bct)}” in Zoho</button></div>`;
       }
     });
     const np=bestNamePhone(data.deals,data.contacts);
@@ -564,10 +606,10 @@ async function runPhotoCheck(){
   }catch(err){ m.className='msg err'; m.textContent='Error: '+err.message; }
   finally{ btn.disabled=false; btn.textContent='Find in Zoho'; }
 }
-async function updateBct(dealId,contactTime,tz,currentStage,btnEl){
+async function updateBct(dealId,contactTime,tz,currentStage,btnEl,zip){
   if(btnEl){ btnEl.disabled=true; btnEl.textContent='Updating…'; }
   try{
-    const body={mode:'update_bct',deal_id:dealId,contact_time:contactTime,timezone:tz,current_stage:currentStage};
+    const body={mode:'update_bct',deal_id:dealId,contact_time:contactTime,timezone:tz,current_stage:currentStage,zip:zip||''};
     const r=await fetch(cfg.create,{method:'POST',headers:apiHeaders({'Content-Type':'application/json'}),body:JSON.stringify(body)});
     let data=null; try{ data=await r.json(); }catch(_){}
     if(!r.ok||!data||data.ok!==true) throw new Error((data&&data.error)||('HTTP '+r.status));
