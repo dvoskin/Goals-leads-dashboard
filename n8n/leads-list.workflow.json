@@ -144,7 +144,7 @@
         -420
       ],
       "parameters": {
-        "jsCode": "// Белый список Google-таблиц, доступных дашборду (все — из существующих автоматизаций)\nconst q = $json.query || {};\nconst DOCS = {\n  tracker:  { id: '10Yr6hkRJK2C6PCvQ1P_t5s1VUls-LZi-1xi8N4j91Z8', title: 'DEAL CREATOR CHAT TRACKER' },\n  deals:    { id: '17MGETzZ-p64JWDfb0q82xxnJ5ZdESKvS4ong2Kh45eE', title: 'DEALS TRACKER' },\n  ads:      { id: '19df3TsfnNzNxE7HYcDscgcdd0RngHKfFDSfBC2AKUAE', title: 'Goals Ads Facebook Forms To CRM' },\n  manychat: { id: '16fRN6rKNrW1QjB-M9qLbtIZKC1TpFs43tJkU1ZtT1Nc', title: 'AI MANYCHAT' },\n};\nconst key = String(q.doc || 'tracker').toLowerCase();\nconst doc = DOCS[key] || DOCS.tracker;\nreturn [{\n  json: {\n    docId: doc.id,\n    docTitle: doc.title,\n    sheetName: String(q.sheet || '').slice(0, 120),\n    query: q,\n  },\n}];\n"
+        "jsCode": "// Белый список Google-таблиц, доступных дашборду (все — из существующих автоматизаций)\nconst q = $json.query || {};\nconst DOCS = {\n  tracker:  { id: '10Yr6hkRJK2C6PCvQ1P_t5s1VUls-LZi-1xi8N4j91Z8', title: 'DEAL CREATOR CHAT TRACKER' },\n  deals:    { id: '17MGETzZ-p64JWDfb0q82xxnJ5ZdESKvS4ong2Kh45eE', title: 'DEALS TRACKER' },\n  ads:      { id: '19df3TsfnNzNxE7HYcDscgcdd0RngHKfFDSfBC2AKUAE', title: 'Goals Ads Facebook Forms To CRM' },\n};\nconst key = String(q.doc || 'tracker').toLowerCase();\nconst doc = DOCS[key] || DOCS.tracker;\nreturn [{\n  json: {\n    docId: doc.id,\n    docTitle: doc.title,\n    sheetName: String(q.sheet || '').slice(0, 120),\n    query: q,\n  },\n}];\n"
       }
     },
     {

@@ -105,7 +105,7 @@ Added | First Name | Last Name | Phone | Email | City | ZIP | Contact Time | Bes
 2. **Журнал дашборда** (`?via=dashboard`) — вся история лидов, добавленных через дашборд, из листа Google Sheets **Dashboard Leads** (без ограничения по датам). Вкладка «Via Dashboard».
 3. **Lookup** (`?lookup=<телефон или имя>`) — поиск по Zoho: телефон ищется точным совпадением по вариантам номера, имя — word-поиском; возвращаются полные карточки `{ok, term, deals:[], contacts:[]}`. Вкладка «Lookup» на дашборде.
 
-4. **Google Sheets-отчёты** (`?sheets=list&doc=<key>` — список вкладок; `?sheet=<название вкладки>&doc=<key>` — последние 500 строк вкладки, новые сверху). Вкладка «Sheets» на дашборде. Ключи `doc`: `tracker` (DEAL CREATOR CHAT TRACKER, по умолчанию), `deals` (DEALS TRACKER), `ads` (Goals Ads Facebook Forms To CRM), `manychat` (AI MANYCHAT) — белый список зашит в ноде `Resolve Doc`. Чтение идёт тем же credential «Google Sheets account», новых доступов не требуется.
+4. **Google Sheets-отчёты** (`?sheets=list&doc=<key>` — список вкладок; `?sheet=<название вкладки>&doc=<key>` — последние 500 строк вкладки, новые сверху). Вкладка «Sheets» на дашборде. Ключи `doc`: `tracker` (DEAL CREATOR CHAT TRACKER, по умолчанию), `deals` (DEALS TRACKER), `ads` (Goals Ads Facebook Forms To CRM) — белый список зашит в ноде `Resolve Doc`. Чтение идёт тем же credential «Google Sheets account», новых доступов не требуется.
 
 Формат массива лидов (режимы 1–2):
 
