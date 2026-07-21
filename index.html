@@ -96,7 +96,7 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
   <div class="card">
     <div class="toolbar">
       <div class="seg" id="viewSeg">
-        <button data-view="all">All recent</button>
+        <button data-view="all" class="active">All recent</button>
         <button data-view="dash">Via Dashboard</button>
       </div>
       <input type="date" id="dFrom" style="max-width:160px" title="From (NY date)">
@@ -351,7 +351,7 @@ const demo=[
 ];
 let rows=demo.slice();
 let sortKey=null,sortDir=1;
-let viewMode='calls';
+let viewMode='all';
 
 // ---------- helpers ----------
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
