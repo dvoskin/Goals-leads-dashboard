@@ -839,6 +839,250 @@
       }
     },
     {
+      "name": "Stats Mode?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        820,
+        220
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "stats-check-1",
+              "leftValue": "={{ $json.query.stats || '' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "name": "Build Stats Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        360
+      ],
+      "parameters": {
+        "jsCode": "// Режим \"Report\": счётчики сделок по стадиям за период (по Modified_Time, NY)\nconst q = $json.query || {};\nconst NY = 'America/New_York';\nconst re = /^\\d{4}-\\d{2}-\\d{2}$/;\nconst fromStr = re.test(String(q.from || '')) ? q.from : DateTime.now().setZone(NY).toFormat('yyyy-MM-dd');\nconst toStr = re.test(String(q.to || '')) ? q.to : fromStr;\nconst fromISO = DateTime.fromISO(fromStr, { zone: NY }).startOf('day').toISO({ suppressMilliseconds: true });\nconst toISO = DateTime.fromISO(toStr, { zone: NY }).endOf('day').set({ millisecond: 0 }).toISO({ suppressMilliseconds: true });\nconst base = 'https://www.zohoapis.com/crm/v2/Deals/search?per_page=200&criteria=';\nconst mk = (stage) => base + encodeURIComponent(`((Stage:equals:${stage})and(Modified_Time:between:${fromISO},${toISO}))`);\nreturn [{\n  json: {\n    from: fromStr,\n    to: toStr,\n    quoteUrl: mk('Quote Sent'),\n    retainerUrl: mk('Retainer Invoice Sent'),\n  },\n}];\n"
+      }
+    },
+    {
+      "name": "Zoho: Quote Sent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1180,
+        360
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "url": "={{ $json.quoteUrl }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "zohoOAuth2Api",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "zohoOAuth2Api": {
+          "id": "8aqN9treZ1cKRtr2",
+          "name": "Zoho account"
+        }
+      }
+    },
+    {
+      "name": "Zoho: Retainer Sent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1360,
+        360
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "url": "={{ $('Build Stats Query').item.json.retainerUrl }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "zohoOAuth2Api",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "zohoOAuth2Api": {
+          "id": "8aqN9treZ1cKRtr2",
+          "name": "Zoho account"
+        }
+      }
+    },
+    {
+      "name": "Merge Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        360
+      ],
+      "parameters": {
+        "jsCode": "// Ответ режима Report: количество Quote Sent и Retainer Invoice Sent за период\nconst quoteResp = $('Zoho: Quote Sent').first().json || {};\nconst retResp = $input.first().json || {};\nconst meta = $('Build Stats Query').first().json;\nconst pickErr = (r) => {\n  if (r.error) return String(r.error.message || r.error.description || JSON.stringify(r.error)).slice(0, 200);\n  if (r.code && r.message) return (r.code + ' ' + r.message).slice(0, 200);\n  return '';\n};\nconst count = (r) => (Array.isArray(r.data) ? r.data.length : 0);\nconst rows = (r) => (Array.isArray(r.data) ? r.data : []).map(d => ({\n  deal: d.Deal_Name || '',\n  contact: (d.Contact_Name && d.Contact_Name.name) || '',\n  phone: d.Phone || '',\n  stage: d.Stage || '',\n  modified: d.Modified_Time || '',\n}));\nconst error = pickErr(quoteResp) && pickErr(retResp) ? 'Zoho: ' + pickErr(quoteResp) : '';\nreturn [{\n  json: {\n    ok: !error,\n    error,\n    from: meta.from,\n    to: meta.to,\n    quote_sent: { count: count(quoteResp), capped: count(quoteResp) >= 200, deals: rows(quoteResp).slice(0, 50) },\n    retainer_sent: { count: count(retResp), capped: count(retResp) >= 200, deals: rows(retResp).slice(0, 50) },\n  },\n}];\n"
+      }
+    },
+    {
+      "name": "Respond Stats",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1720,
+        360
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "Calls Mode?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1000,
+        160
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "calls-check-1",
+              "leftValue": "={{ ($json.query.calls_from || $json.query.calls_to || '') }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "name": "Build Calls Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        240
+      ],
+      "parameters": {
+        "jsCode": "// Режим \"звонки за период\": сделки с Call_Scheduled_Date_Time в диапазоне (по NY)\n// + сделки CALL NOW, созданные в этом диапазоне.\nconst q = $json.query || {};\nconst NY = 'America/New_York';\nconst re = /^\\d{4}-\\d{2}-\\d{2}$/;\nconst fromStr = re.test(String(q.calls_from || '')) ? q.calls_from : DateTime.now().setZone(NY).toFormat('yyyy-MM-dd');\nconst toStr = re.test(String(q.calls_to || '')) ? q.calls_to : fromStr;\nconst fromISO = DateTime.fromISO(fromStr, { zone: NY }).startOf('day').toISO({ suppressMilliseconds: true });\nconst toISO = DateTime.fromISO(toStr, { zone: NY }).endOf('day').set({ millisecond: 0 }).toISO({ suppressMilliseconds: true });\n\nconst c1 = `(Call_Scheduled_Date_Time:between:${fromISO},${toISO})`;\nconst c2 = `((Best_Contact_Time:equals:CALL NOW)and(Created_Time:between:${fromISO},${toISO}))`;\nconst base = 'https://www.zohoapis.com/crm/v2/Deals/search?per_page=200&criteria=';\n\nreturn [{\n  json: {\n    from: fromStr,\n    to: toStr,\n    scheduledUrl: base + encodeURIComponent(c1),\n    callNowUrl: base + encodeURIComponent(c2),\n  },\n}];\n"
+      }
+    },
+    {
+      "name": "Zoho: Calls Scheduled",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1360,
+        240
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "url": "={{ $json.scheduledUrl }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "zohoOAuth2Api",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "zohoOAuth2Api": {
+          "id": "8aqN9treZ1cKRtr2",
+          "name": "Zoho account"
+        }
+      }
+    },
+    {
+      "name": "Zoho: Calls Now",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        240
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "url": "={{ $('Build Calls Query').item.json.callNowUrl }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "zohoOAuth2Api",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "zohoOAuth2Api": {
+          "id": "8aqN9treZ1cKRtr2",
+          "name": "Zoho account"
+        }
+      }
+    },
+    {
+      "name": "Merge Calls",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1720,
+        240
+      ],
+      "parameters": {
+        "jsCode": "// Объединяем два поиска (запланированные звонки + CALL NOW) и дедупим по id\nconst schedResp = $('Zoho: Calls Scheduled').first().json || {};\nconst nowResp = $input.first().json || {};\nconst pickErr = (r) => {\n  if (r.error) return String(r.error.message || r.error.description || JSON.stringify(r.error)).slice(0, 200);\n  if (r.code && r.message) return (r.code + ' ' + r.message).slice(0, 200);\n  return '';\n};\nconst seen = new Set();\nconst data = [];\nfor (const resp of [schedResp, nowResp]) {\n  for (const d of (Array.isArray(resp.data) ? resp.data : [])) {\n    if (!d || !d.id || seen.has(d.id)) continue;\n    seen.add(d.id);\n    data.push(d);\n  }\n}\nconst e1 = pickErr(schedResp), e2 = pickErr(nowResp);\nconst error = (e1 && e2) ? ('Zoho: ' + e1) : '';\nreturn [{ json: error ? { error: { message: error } } : { data } }];\n"
+      }
+    },
+    {
       "name": "Build COQL",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -947,7 +1191,7 @@
         80
       ],
       "parameters": {
-        "jsCode": "// Универсальный маппер: вход — ответ COQL (плоские ключи \"Contact_Name.X\")\n// или REST GET /Deals (Contact_Name: {name,id}) из запасной ветки.\nconst resp = $input.first().json || {};\nconst q = $('Webhook').first().json.query || {};\nlet rows = Array.isArray(resp.data) ? resp.data : [];\nlet error = '';\nif (!Array.isArray(resp.data) && Object.keys(resp).length > 0) {\n  if (resp.error) {\n    const e = resp.error;\n    error = 'Zoho: ' + String(e.message || e.description || (typeof e === 'string' ? e : JSON.stringify(e))).slice(0, 300);\n  } else if (resp.message || resp.code) {\n    error = ('Zoho: ' + (resp.code || '') + ' ' + (resp.message || '')).trim();\n  }\n}\nconst g = (r, k) => {\n  if (r[k] !== undefined && r[k] !== null) return r[k];\n  let v = r;\n  for (const p of k.split('.')) v = (v && typeof v === 'object') ? v[p] : undefined;\n  return v == null ? '' : v;\n};\n// COQL отдаёт поля контакта; REST-фолбэк — нет (тогда Email/City не включаем вовсе,\n// чтобы на дашборде не висели пустые колонки)\nconst coqlMode = rows.some(r => Object.keys(r).some(k => k.startsWith('Contact_Name.')));\n\nlet leads = rows.map(r => {\n  let added = '';\n  if (r.Created_Time) {\n    const dt = DateTime.fromISO(r.Created_Time).setZone('America/New_York');\n    added = dt.isValid ? dt.toFormat('yyyy-MM-dd HH:mm') : String(r.Created_Time);\n  }\n  let first = String(g(r, 'Contact_Name.First_Name') || '');\n  let last = String(g(r, 'Contact_Name.Last_Name') || '');\n  if (!first && !last) {\n    const nameSrc = (r.Contact_Name && r.Contact_Name.name) || r.Deal_Name || '';\n    const parts = String(nameSrc).trim().split(/\\s+/);\n    first = parts.shift() || '';\n    last = parts.join(' ');\n  }\n  const lead = { added, first_name: first, last_name: last, phone: r.Phone || '' };\n  if (coqlMode) {\n    lead.email = String(g(r, 'Contact_Name.Email') || '');\n    lead.city = String(g(r, 'Contact_Name.Mailing_State') || '');\n  }\n  lead.zip = r.Zip_Code || '';\n  lead.contact_time = r.Best_Contact_Time || '';\n  lead.source = r.Lead_Source || '';\n  lead.status = r.Stage || '';\n  lead.deal_stage = r.Stage || '';\n  lead.deal_id = r.id || '';\n  lead.via_dashboard = /Added via Dashboard/i.test(String(r.Description || ''));\n  return lead;\n});\nconst search = String(q.search || '').trim().toLowerCase();\nif (search) leads = leads.filter(l => JSON.stringify(l).toLowerCase().includes(search));\nconst limit = parseInt(q.limit, 10);\nif (Number.isFinite(limit) && limit > 0) leads = leads.slice(0, limit);\n\n// Если сработал REST-фолбэк, покажем причину отказа COQL в подсказке дашборда\nlet notice = '';\ntry {\n  const coqlResp = $('Zoho: COQL Query').first().json || {};\n  if (coqlResp.error) {\n    const e = coqlResp.error;\n    notice = 'COQL unavailable (' + String(e.message || e.description || JSON.stringify(e)).slice(0, 160) + ') — using REST fallback without Email/City';\n  }\n} catch (e) { /* COQL-ноды в этом прогоне не было */ }\n\nreturn [{ json: { ok: !error, error, notice, count: leads.length, leads } }];\n"
+        "jsCode": "// Универсальный маппер: вход — ответ COQL (плоские ключи \"Contact_Name.X\")\n// или REST GET /Deals (Contact_Name: {name,id}) из запасной ветки.\nconst resp = $input.first().json || {};\nconst q = $('Webhook').first().json.query || {};\nlet rows = Array.isArray(resp.data) ? resp.data : [];\nlet error = '';\nif (!Array.isArray(resp.data) && Object.keys(resp).length > 0) {\n  if (resp.error) {\n    const e = resp.error;\n    error = 'Zoho: ' + String(e.message || e.description || (typeof e === 'string' ? e : JSON.stringify(e))).slice(0, 300);\n  } else if (resp.message || resp.code) {\n    error = ('Zoho: ' + (resp.code || '') + ' ' + (resp.message || '')).trim();\n  }\n}\nconst g = (r, k) => {\n  if (r[k] !== undefined && r[k] !== null) return r[k];\n  let v = r;\n  for (const p of k.split('.')) v = (v && typeof v === 'object') ? v[p] : undefined;\n  return v == null ? '' : v;\n};\n// COQL отдаёт поля контакта; REST-фолбэк — нет (тогда Email/City не включаем вовсе,\n// чтобы на дашборде не висели пустые колонки)\nconst coqlMode = rows.some(r => Object.keys(r).some(k => k.startsWith('Contact_Name.')));\n\nlet leads = rows.map(r => {\n  let added = '';\n  if (r.Created_Time) {\n    const dt = DateTime.fromISO(r.Created_Time).setZone('America/New_York');\n    added = dt.isValid ? dt.toFormat('yyyy-MM-dd HH:mm') : String(r.Created_Time);\n  }\n  let first = String(g(r, 'Contact_Name.First_Name') || '');\n  let last = String(g(r, 'Contact_Name.Last_Name') || '');\n  if (!first && !last) {\n    const nameSrc = (r.Contact_Name && r.Contact_Name.name) || r.Deal_Name || '';\n    const parts = String(nameSrc).trim().split(/\\s+/);\n    first = parts.shift() || '';\n    last = parts.join(' ');\n  }\n  const callsMode = !!(q.calls_from || q.calls_to);\n  const lead = { added, first_name: first, last_name: last, phone: r.Phone || '' };\n  if (callsMode) {\n    const isNow = String(r.Best_Contact_Time || '').trim().toUpperCase() === 'CALL NOW';\n    let callAt = '';\n    if (r.Call_Scheduled_Date_Time) {\n      const cd = DateTime.fromISO(r.Call_Scheduled_Date_Time).setZone('America/New_York');\n      callAt = cd.isValid ? cd.toFormat('MM-dd h:mma') + ' ET' : String(r.Call_Scheduled_Date_Time);\n    }\n    lead.call_at = isNow ? 'CALL NOW' : callAt;\n    lead.call_at_iso = r.Call_Scheduled_Date_Time || '';\n    lead.call_now = isNow;\n  }\n  if (coqlMode) {\n    lead.email = String(g(r, 'Contact_Name.Email') || '');\n    lead.city = String(g(r, 'Contact_Name.Mailing_State') || '');\n  }\n  lead.zip = r.Zip_Code || '';\n  lead.contact_time = r.Best_Contact_Time || '';\n  lead.source = r.Lead_Source || '';\n  lead.status = r.Stage || '';\n  lead.deal_stage = r.Stage || '';\n  lead.deal_id = r.id || '';\n  lead.via_dashboard = /Added via Dashboard/i.test(String(r.Description || ''));\n  return lead;\n});\nconst search = String(q.search || '').trim().toLowerCase();\nif (search) leads = leads.filter(l => JSON.stringify(l).toLowerCase().includes(search));\nconst limit = parseInt(q.limit, 10);\nif (Number.isFinite(limit) && limit > 0) leads = leads.slice(0, limit);\n// Режим звонков: CALL NOW сверху (свежие первыми), дальше по времени звонка\nif (q.calls_from || q.calls_to) {\n  leads.sort((a, b) => {\n    if (a.call_now !== b.call_now) return a.call_now ? -1 : 1;\n    if (a.call_now) return String(b.added).localeCompare(String(a.added));\n    return String(a.call_at_iso || '9999').localeCompare(String(b.call_at_iso || '9999'));\n  });\n}\n\n// Если сработал REST-фолбэк, покажем причину отказа COQL в подсказке дашборда\nlet notice = '';\ntry {\n  const coqlResp = $('Zoho: COQL Query').first().json || {};\n  if (coqlResp.error) {\n    const e = coqlResp.error;\n    notice = 'COQL unavailable (' + String(e.message || e.description || JSON.stringify(e)).slice(0, 160) + ') — using REST fallback without Email/City';\n  }\n} catch (e) { /* COQL-ноды в этом прогоне не было */ }\n\nreturn [{ json: { ok: !error, error, notice, count: leads.length, leads } }];\n"
       }
     },
     {
@@ -1380,7 +1624,131 @@
         ],
         [
           {
+            "node": "Stats Mode?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stats Mode?": {
+      "main": [
+        [
+          {
+            "node": "Build Stats Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Calls Mode?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Stats Query": {
+      "main": [
+        [
+          {
+            "node": "Zoho: Quote Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoho: Quote Sent": {
+      "main": [
+        [
+          {
+            "node": "Zoho: Retainer Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoho: Retainer Sent": {
+      "main": [
+        [
+          {
+            "node": "Merge Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Stats": {
+      "main": [
+        [
+          {
+            "node": "Respond Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calls Mode?": {
+      "main": [
+        [
+          {
+            "node": "Build Calls Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
             "node": "Build COQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Calls Query": {
+      "main": [
+        [
+          {
+            "node": "Zoho: Calls Scheduled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoho: Calls Scheduled": {
+      "main": [
+        [
+          {
+            "node": "Zoho: Calls Now",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoho: Calls Now": {
+      "main": [
+        [
+          {
+            "node": "Merge Calls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Calls": {
+      "main": [
+        [
+          {
+            "node": "Map Rows",
             "type": "main",
             "index": 0
           }

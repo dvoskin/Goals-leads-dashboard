@@ -35,6 +35,8 @@ th,td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;white
 th{color:var(--mut);cursor:pointer;user-select:none;position:sticky;top:0;background:var(--card);z-index:1}
 th:hover{color:var(--ink)}
 tbody tr:hover{background:#0e1830}
+tbody tr.soon td{background:#123f28}
+tbody tr.soon:hover td{background:#175033}
 .tablewrap{overflow:auto;max-height:62vh;border:1px solid var(--line);border-radius:12px}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .grid .full{grid-column:1/-1}
@@ -67,34 +69,41 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
     <h1>Leads Dashboard</h1>
     <div class="sub">n8n → Zoho CRM · Goals Plastic Surgery leads hub</div>
   </div>
-  <span class="pill" id="modePill">demo mode</span>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <span class="pill" id="modePill">demo mode</span>
+    <button class="btn ghost" onclick="openSettings()" style="padding:7px 13px">⚙️ Settings</button>
+  </div>
 </header>
 
 <nav>
-  <button data-tab="report" class="active">📊 Report</button>
-  <button data-tab="lookup">🔍 Lookup</button>
+  <button data-tab="report" class="active">📞 <span id="navLeadsLabel">Leads · today</span></button>
+  <button data-tab="report2">📈 Report</button>
+  <button data-tab="fbform">📘 Facebook Form</button>
   <button data-tab="sheets">📑 Sheets</button>
+  <button data-tab="lookup">🔍 Lookup</button>
   <button data-tab="add">➕ New Lead</button>
-  <button data-tab="settings">⚙️ Settings</button>
 </nav>
 
-<!-- ============ REPORT ============ -->
+<!-- ============ LEADS (calls for date) ============ -->
 <section id="tab-report">
   <div class="stats">
-    <div class="stat"><b id="stTotal">0</b>total loaded</div>
-    <div class="stat"><b id="stToday">0</b>today</div>
-    <div class="stat"><b id="stDash">0</b>via dashboard</div>
+    <div class="stat"><b id="stTotal">0</b>leads</div>
+    <div class="stat"><b id="stNow">0</b>CALL NOW</div>
+    <div class="stat"><b id="stSoon">0</b>call within 1h</div>
     <div class="stat"><b id="stShown">0</b>shown</div>
     <div class="stat"><b id="stUpd">—</b>updated</div>
   </div>
   <div class="card">
     <div class="toolbar">
       <div class="seg" id="viewSeg">
-        <button data-view="today" class="active">Today</button>
-        <button data-view="all">All</button>
+        <button data-view="calls" class="active">Calls</button>
+        <button data-view="all">All recent</button>
         <button data-view="dash">Via Dashboard</button>
       </div>
-      <input id="search" placeholder="🔎 Search all fields…">
+      <input type="date" id="dFrom" style="max-width:160px" title="From (NY date)">
+      <input type="date" id="dTo" style="max-width:160px" title="To (NY date)">
+      <button class="btn ghost" onclick="setCallsToday()">Today</button>
+      <input id="search" placeholder="🔎 Search…" style="max-width:180px">
       <select id="fltSource" title="Source"><option value="">Source: all</option></select>
       <select id="fltStage" title="Stage"><option value="">Stage: all</option></select>
       <button class="btn ghost" onclick="loadReport()">↻ Refresh</button>
@@ -105,6 +114,51 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
       <table id="tbl"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table>
     </div>
     <div class="note" id="reportNote">Showing demo data. Set the report webhook URL in Settings to pull real leads from n8n / Zoho.</div>
+    <p class="muted" style="font-size:12.5px;margin:8px 0 0">Calls view: leads whose Best Contact Time falls on the selected day(s) (New York) plus CALL NOW leads created that day. <span style="background:#123f28;padding:1px 8px;border-radius:6px">Green rows</span> = call within the next hour (or CALL NOW).</p>
+  </div>
+</section>
+
+<!-- ============ REPORT (stage stats + Report sheet) ============ -->
+<section id="tab-report2" style="display:none">
+  <div class="card">
+    <h2 style="margin-top:0;font-size:18px">📈 Zoho stages</h2>
+    <div class="toolbar">
+      <input type="date" id="rpFrom" style="max-width:160px">
+      <input type="date" id="rpTo" style="max-width:160px">
+      <button class="btn ghost" onclick="rpToday()">Today</button>
+      <button class="btn" onclick="loadReport2()">Load</button>
+      <span class="muted" id="rpHint" style="font-size:12.5px"></span>
+    </div>
+    <div class="stats">
+      <div class="stat"><b id="rpQuote">—</b>Quote Sent</div>
+      <div class="stat"><b id="rpRetainer">—</b>Retainer Invoice Sent</div>
+    </div>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0;font-size:16px">Sheet «Report» — DEAL CREATOR CHAT TRACKER</h3>
+    <div class="toolbar">
+      <button class="btn ghost" onclick="loadReportSheet()">↻ Refresh</button>
+      <span class="muted" id="rpShHint" style="font-size:12.5px"></span>
+    </div>
+    <div class="tablewrap">
+      <table><thead><tr id="rpThead"></tr></thead><tbody id="rpTbody"></tbody></table>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FACEBOOK FORM (last 7 days) ============ -->
+<section id="tab-fbform" style="display:none">
+  <div class="card">
+    <h2 style="margin-top:0;font-size:18px">📘 Facebook Form — last 7 days</h2>
+    <div class="toolbar">
+      <input id="fbSearch" placeholder="🔎 Filter rows…" style="max-width:220px">
+      <button class="btn ghost" onclick="loadFbForm()">↻ Refresh</button>
+      <span class="muted" id="fbHint" style="font-size:12.5px"></span>
+    </div>
+    <div class="tablewrap">
+      <table><thead><tr id="fbThead"></tr></thead><tbody id="fbTbody"></tbody></table>
+    </div>
+    <div class="note">Rows from the «Facebook Form» tab of DEAL CREATOR CHAT TRACKER created in the last 7 days, newest first.</div>
   </div>
 </section>
 
@@ -278,12 +332,17 @@ function apiHeaders(extra){
 }
 
 // ---------- tabs ----------
-document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
-  document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));
-  b.classList.add('active');
-  ['report','lookup','sheets','add','settings'].forEach(t=>document.getElementById('tab-'+t).style.display='none');
-  document.getElementById('tab-'+b.dataset.tab).style.display='';
-});
+const ALL_TABS=['report','report2','fbform','sheets','lookup','add','settings'];
+let r2Loaded=false,fbLoaded=false;
+function showTab(t){
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.tab===t));
+  ALL_TABS.forEach(x=>document.getElementById('tab-'+x).style.display=x===t?'':'none');
+  if(t==='report2'&&!r2Loaded&&cfg.report){r2Loaded=true;rpToday();loadReportSheet();}
+  if(t==='fbform'&&!fbLoaded&&cfg.report){fbLoaded=true;loadFbForm();}
+}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
+function openSettings(){showTab('settings');}
+function todayNY(){return new Date().toLocaleDateString('en-CA',{timeZone:'America/New_York'});}
 
 // ---------- demo data ----------
 const demo=[
@@ -293,13 +352,13 @@ const demo=[
 ];
 let rows=demo.slice();
 let sortKey=null,sortDir=1;
-let viewMode='today';
+let viewMode='calls';
 
 // ---------- helpers ----------
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const COL_ORDER=['added','first_name','last_name','phone','email','city','zip','contact_time','source','status','deal_stage','welcome','via','deal_id'];
-const COL_LABEL={added:'Added',first_name:'First Name',last_name:'Last Name',phone:'Phone',email:'Email',city:'City',zip:'ZIP',contact_time:'Call Time',source:'Source',status:'Status',deal_stage:'Stage',welcome:'Welcome SMS',via:'Channel',deal_id:'Deal ID'};
-const HIDDEN_COLS=['via_dashboard','welcome_sms'];
+const COL_ORDER=['call_at','added','first_name','last_name','phone','email','city','zip','contact_time','source','status','deal_stage','welcome','via','deal_id'];
+const COL_LABEL={call_at:'Call At',added:'Added',first_name:'First Name',last_name:'Last Name',phone:'Phone',email:'Email',city:'City',zip:'ZIP',contact_time:'Call Time',source:'Source',status:'Status',deal_stage:'Stage',welcome:'Welcome SMS',via:'Channel',deal_id:'Deal ID'};
+const HIDDEN_COLS=['via_dashboard','welcome_sms','call_at_iso','call_now'];
 function cols(){
   const s=new Set(); rows.forEach(r=>Object.keys(r).forEach(k=>s.add(k)));
   HIDDEN_COLS.forEach(k=>s.delete(k));
@@ -316,6 +375,15 @@ function cellValue(r,k){
 }
 function rowDate(r){ return String(r.added||r.date||r.created||''); }
 function todayStr(){ return new Date().toISOString().slice(0,10); }
+// Зелёная строка: CALL NOW или запланированный звонок в ближайший час
+function isSoon(r){
+  if(r.call_now===true) return true;
+  if(!r.call_at_iso) return false;
+  const t=Date.parse(r.call_at_iso);
+  if(isNaN(t)) return false;
+  const now=Date.now();
+  return t>=now-15*60e3&&t<=now+60*60e3;
+}
 
 // ---------- report ----------
 async function loadReport(){
@@ -333,6 +401,13 @@ async function loadReport(){
     const lim=parseInt(cfg.limit,10);
     if(Number.isFinite(lim)&&lim>0) u.searchParams.set('limit',Math.min(lim,200));
     if(viewMode==='dash') u.searchParams.set('via','dashboard');
+    if(viewMode==='calls'){
+      const f=document.getElementById('dFrom').value||todayNY();
+      const t=document.getElementById('dTo').value||f;
+      u.searchParams.set('calls_from',f); u.searchParams.set('calls_to',t);
+      const lbl=document.getElementById('navLeadsLabel');
+      lbl.textContent='Leads · '+(f===t?(f===todayNY()?'today · '+f:f):f+' → '+t);
+    }
     const r=await fetch(u,{headers:apiHeaders()});
     let data=null;
     try{ data=await r.json(); }catch(_){ data=null; }
@@ -371,7 +446,6 @@ function filteredRows(){
   const fg=document.getElementById('fltStage').value;
   const today=todayStr();
   return rows.filter(r=>{
-    if(viewMode==='today'&&!rowDate(r).startsWith(today)) return false;
     if(viewMode==='dash'&&!r.via_dashboard) return false;
     if(q&&!JSON.stringify(r).toLowerCase().includes(q)) return false;
     if(fs&&String(r.source??'')!==fs) return false;
@@ -384,29 +458,34 @@ function renderTable(){
   if(sortKey) data=data.slice().sort((a,b)=>String(cellValue(a,sortKey)??'').localeCompare(String(cellValue(b,sortKey)??''),'en',{numeric:true})*sortDir);
   const c=cols();
   document.getElementById('thead').innerHTML=c.map(k=>`<th onclick="setSort('${esc(k)}')">${esc(COL_LABEL[k]||k)}${sortKey===k?(sortDir>0?' ▲':' ▼'):''}</th>`).join('');
-  document.getElementById('tbody').innerHTML=data.map(r=>'<tr>'+c.map(k=>{
+  document.getElementById('tbody').innerHTML=data.map(r=>'<tr'+(isSoon(r)?' class="soon"':'')+'>'+c.map(k=>{
     const v=cellValue(r,k);
     if(k==='via'&&v) return `<td><span class="tag">Dashboard</span></td>`;
     if(k==='welcome'&&v) return `<td><span class="tag" title="An outbound RingCentral SMS was sent to this lead">💬 sent</span></td>`;
+    if(k==='call_at'&&v==='CALL NOW') return `<td><b style="color:var(--okink)">CALL NOW</b></td>`;
     return `<td title="${esc(v)}">${esc(v)}</td>`;
   }).join('')+'</tr>').join('')
     || `<tr><td colspan="${c.length||1}" class="muted" style="padding:20px">No data</td></tr>`;
-  const today=todayStr();
   document.getElementById('stTotal').textContent=rows.length;
   document.getElementById('stShown').textContent=data.length;
-  document.getElementById('stToday').textContent=rows.filter(r=>rowDate(r).startsWith(today)).length;
-  document.getElementById('stDash').textContent=rows.filter(r=>r.via_dashboard).length;
+  document.getElementById('stNow').textContent=rows.filter(r=>r.call_now===true).length;
+  document.getElementById('stSoon').textContent=rows.filter(isSoon).length;
 }
 function setSort(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k;sortDir=1;} renderTable(); }
 document.getElementById('search').addEventListener('input',renderTable);
 ['fltSource','fltStage'].forEach(id=>document.getElementById(id).addEventListener('change',renderTable));
 document.querySelectorAll('#viewSeg button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#viewSeg button').forEach(x=>x.classList.remove('active'));
-  const prev=viewMode;
   b.classList.add('active'); viewMode=b.dataset.view;
-  // Вид "Via Dashboard" тянет полную историю из журнала — это отдельный запрос
-  if(cfg.report&&(viewMode==='dash'||prev==='dash')) loadReport(); else renderTable();
+  // Каждый вид — отдельный источник данных (calls / journal / recent list)
+  if(cfg.report) loadReport(); else renderTable();
 });
+function setCallsToday(){
+  document.getElementById('dFrom').value=todayNY();
+  document.getElementById('dTo').value=todayNY();
+  if(viewMode==='calls') loadReport();
+}
+['dFrom','dTo'].forEach(id=>document.getElementById(id).addEventListener('change',()=>{if(viewMode==='calls')loadReport();}));
 function exportCsv(){
   const c=cols(); const data=filteredRows();
   const q=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
@@ -673,8 +752,7 @@ document.addEventListener('paste',async e=>{
           setPastePhoto(data);
           const m=document.getElementById('pasteMsg'); m.className='msg ok'; m.textContent='✓ Screenshot pasted — press “Parse & Create in Zoho”.';
         }else{
-          document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.tab==='lookup'));
-          ['report','lookup','sheets','add','settings'].forEach(t=>document.getElementById('tab-'+t).style.display=t==='lookup'?'':'none');
+          showTab('lookup');
           setCheckPhoto(data);
           const m=document.getElementById('checkMsg'); m.className='msg ok'; m.textContent='✓ Screenshot pasted — press “Find in Zoho”.';
         }
@@ -730,6 +808,74 @@ async function updateBct(dealId,contactTime,tz,currentStage,btnEl,zip){
     if(btnEl){ btnEl.disabled=false; btnEl.textContent='Retry — '+err.message; }
   }
 }
+
+// ---------- shared dynamic table renderer ----------
+const tableStates={};
+function drawTable(theadId,tbodyId,rowsArr){
+  const st=tableStates[theadId]||(tableStates[theadId]={key:null,dir:1});
+  const colsArr=[...new Set(rowsArr.flatMap(r=>Object.keys(r)))];
+  let data=rowsArr;
+  if(st.key) data=rowsArr.slice().sort((a,b)=>String(a[st.key]??'').localeCompare(String(b[st.key]??''),'en',{numeric:true})*st.dir);
+  const th=document.getElementById(theadId),tb=document.getElementById(tbodyId);
+  th.innerHTML=colsArr.map(k=>`<th data-k="${esc(k)}">${esc(k)}${st.key===k?(st.dir>0?' ▲':' ▼'):''}</th>`).join('');
+  tb.innerHTML=data.map(r=>'<tr>'+colsArr.map(k=>`<td title="${esc(r[k])}">${esc(r[k])}</td>`).join('')+'</tr>').join('')
+    ||`<tr><td colspan="${colsArr.length||1}" class="muted" style="padding:16px">No data</td></tr>`;
+  th.querySelectorAll('th').forEach(el=>el.onclick=()=>{const k=el.dataset.k;if(st.key===k)st.dir*=-1;else{st.key=k;st.dir=1;}drawTable(theadId,tbodyId,rowsArr);});
+}
+
+// ---------- Report tab (Zoho stage stats + Report sheet) ----------
+function rpToday(){
+  document.getElementById('rpFrom').value=todayNY();
+  document.getElementById('rpTo').value=todayNY();
+  loadReport2();
+}
+async function loadReport2(){
+  const hint=document.getElementById('rpHint');
+  if(!cfg.report){ hint.textContent='Set the report webhook URL in Settings first.'; return; }
+  const f=document.getElementById('rpFrom').value||todayNY();
+  const t=document.getElementById('rpTo').value||f;
+  hint.textContent='loading…';
+  try{
+    const data=await sheetsFetch({stats:'1',from:f,to:t});
+    document.getElementById('rpQuote').textContent=(data.quote_sent?.count??0)+(data.quote_sent?.capped?'+':'');
+    document.getElementById('rpRetainer').textContent=(data.retainer_sent?.count??0)+(data.retainer_sent?.capped?'+':'');
+    hint.textContent='deals that reached the stage between '+f+' and '+t+' (NY, by last modification)';
+  }catch(e){ hint.textContent='error: '+e.message; }
+}
+async function loadReportSheet(){
+  const hint=document.getElementById('rpShHint');
+  if(!cfg.report){ hint.textContent='Set the report webhook URL in Settings first.'; return; }
+  hint.textContent='loading…';
+  try{
+    const data=await sheetsFetch({sheet:'Report',doc:'tracker'});
+    drawTable('rpThead','rpTbody',data.rows||[]);
+    hint.textContent='showing '+(data.count||0)+' of '+(data.total||0)+' rows'+(data.notice?' · '+data.notice:'');
+  }catch(e){ hint.textContent='error: '+e.message+' (does the «Report» tab exist in the sheet?)'; }
+}
+
+// ---------- Facebook Form tab (last 7 days from the sheet) ----------
+let fbRows=[];
+function fbFiltered(){
+  const q=(document.getElementById('fbSearch').value||'').toLowerCase();
+  return fbRows.filter(r=>!q||JSON.stringify(r).toLowerCase().includes(q));
+}
+async function loadFbForm(){
+  const hint=document.getElementById('fbHint');
+  if(!cfg.report){ hint.textContent='Set the report webhook URL in Settings first.'; return; }
+  hint.textContent='loading…';
+  try{
+    const data=await sheetsFetch({sheet:'Facebook Form',doc:'tracker'});
+    const cutoff=Date.now()-7*864e5;
+    fbRows=(data.rows||[]).filter(r=>{
+      const v=r['Created Time']||r['Date&Time']||r['Added']||'';
+      const t=Date.parse(String(v).replace(' ','T'));
+      return !isNaN(t)&&t>=cutoff;
+    });
+    drawTable('fbThead','fbTbody',fbFiltered());
+    hint.textContent=fbRows.length+' leads in the last 7 days (of '+(data.total||0)+' total rows)';
+  }catch(e){ hint.textContent='error: '+e.message; }
+}
+document.getElementById('fbSearch').addEventListener('input',()=>drawTable('fbThead','fbTbody',fbFiltered()));
 
 // ---------- Google Sheets reports ----------
 let shRows=[],shSort=null,shDir=1;
@@ -858,6 +1004,8 @@ async function submitPaste(){
 }
 
 // ---------- init ----------
+document.getElementById('dFrom').value=todayNY();
+document.getElementById('dTo').value=todayNY();
 fillCfg(); updateMode(); loadReport();
 </script>
 </body></html>
