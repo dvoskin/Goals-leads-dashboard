@@ -96,7 +96,6 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
   <div class="card">
     <div class="toolbar">
       <div class="seg" id="viewSeg">
-        <button data-view="calls" class="active">Calls</button>
         <button data-view="all">All recent</button>
         <button data-view="dash">Via Dashboard</button>
       </div>
@@ -475,9 +474,11 @@ function setSort(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k;sortDir=1;} re
 document.getElementById('search').addEventListener('input',renderTable);
 ['fltSource','fltStage'].forEach(id=>document.getElementById(id).addEventListener('change',renderTable));
 document.querySelectorAll('#viewSeg button').forEach(b=>b.onclick=()=>{
+  const wasActive=b.classList.contains('active');
   document.querySelectorAll('#viewSeg button').forEach(x=>x.classList.remove('active'));
-  b.classList.add('active'); viewMode=b.dataset.view;
-  // Каждый вид — отдельный источник данных (calls / journal / recent list)
+  // Повторный клик по активному виду возвращает к основному списку звонков
+  if(wasActive){ viewMode='calls'; }
+  else { b.classList.add('active'); viewMode=b.dataset.view; }
   if(cfg.report) loadReport(); else renderTable();
 });
 function setCallsToday(){
