@@ -592,8 +592,16 @@ async function runLookup(){
     const deals=data.deals||[], contacts=data.contacts||[];
     if(!deals.length&&!contacts.length){ m.className='msg err'; m.textContent=searchNote+'nothing found in Zoho for "'+term+'".'; return; }
     m.className='msg ok'; m.textContent=searchNote+'found: '+deals.length+' deal(s), '+contacts.length+' contact(s).';
+    let rcHtml='';
+    if(data.rc_sms){
+      const rc=data.rc_sms;
+      if(!rc.checked) rcHtml=`<div class="note">⚠ Welcome-SMS check unavailable: ${esc(rc.error||'')}</div>`;
+      else if(rc.sent) rcHtml=`<div class="msg ok" style="display:block">💬 RingCentral SMS sent to this lead:`
+        +rc.messages.map(x=>`<div style="margin-top:7px;padding:7px 10px;border-radius:9px;background:#0c2a1a;font-size:13px"><span class="muted" style="font-size:11.5px">${esc(String(x.time).slice(0,16).replace('T',' '))}</span><br>${esc(x.text)}</div>`).join('')+`</div>`;
+      else rcHtml=`<div class="msg err" style="display:block">✗ No outbound RingCentral SMS to this lead in the last 90 days.</div>`;
+    }
     const np=bestNamePhone(deals,contacts);
-    box.innerHTML=chatButton(np.name,np.phone,'chatBoxLookup',np.psid)
+    box.innerHTML=rcHtml+chatButton(np.name,np.phone,'chatBoxLookup',np.psid)
       +(deals.length?`<h3 style="font-size:15px;margin:6px 0">Deals (${deals.length})</h3>`+deals.map(d=>recordCard(d,'deal')).join(''):'')
       +(contacts.length?`<h3 style="font-size:15px;margin:14px 0 6px">Contacts (${contacts.length})</h3>`+contacts.map(c=>recordCard(c,'contact')).join(''):'');
   }catch(err){ m.className='msg err'; m.textContent='Error: '+err.message+' (check webhook URL, token and CORS).'; }
@@ -759,7 +767,8 @@ async function loadSheetRows(){
   try{
     const data=await sheetsFetch({sheet:tab,doc:shDoc.value});
     shRows=data.rows||[]; shSort=null;
-    hint.textContent='showing '+(data.count||0)+' of '+(data.total||0)+' rows · '+(data.doc||'')+' / '+(data.sheet||'');
+    hint.textContent='showing '+(data.count||0)+' of '+(data.total||0)+' rows · '+(data.doc||'')+' / '+(data.sheet||'')
+      +(data.notice?' · '+data.notice:'');
     renderSheetTable();
   }catch(e){ hint.textContent='error: '+e.message; shRows=[]; renderSheetTable(); }
   finally{ btn.disabled=false; btn.textContent='Load report'; }

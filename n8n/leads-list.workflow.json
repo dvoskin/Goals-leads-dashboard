@@ -413,11 +413,100 @@
       }
     },
     {
+      "name": "RC: Mint Token (Sheets)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1460,
+        -360
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "https://platform.ringcentral.com/restapi/oauth/token",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "urn:ietf:params:oauth:grant-type:jwt-bearer"
+            },
+            {
+              "name": "assertion",
+              "value": "={{ $vars.RC_JWT_ASSERTION || $env.RC_JWT_ASSERTION || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "NGzTKetSf4HMBiX7",
+          "name": "RingCentral Basic"
+        }
+      }
+    },
+    {
+      "name": "RC: Sheets Messages",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1640,
+        -360
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "url": "={{ 'https://platform.ringcentral.com/restapi/v1.0/account/~/extension/~/message-store?messageType=SMS&direction=Outbound&perPage=250&dateFrom=' + encodeURIComponent($now.minus({days:90}).toUTC().toISO({suppressMilliseconds:true})) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.access_token || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "pagination": {
+            "pagination": {
+              "paginationMode": "responseContainsNextURL",
+              "nextURL": "={{ $response.body.navigation && $response.body.navigation.nextPage ? ($response.body.navigation.nextPage.uri || '') : '' }}",
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.navigation || !$response.body.navigation.nextPage || !$response.body.navigation.nextPage.uri }}",
+              "limitPagesFetched": true,
+              "maxRequests": 4,
+              "requestInterval": 150
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "Mark Sheet Welcome",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1820,
+        -360
+      ],
+      "parameters": {
+        "jsCode": "// Помечаем строки листа, чей телефон получал исходящий RC SMS (последние 90 дней)\nconst items = $input.all();\nconst sheet = $('Map Sheet Rows').first().json;\n\nlet rcErr = '';\nconst sentTo = new Set();\nfor (const it of items) {\n  const r = it.json || {};\n  if (r.error) {\n    const e = r.error;\n    rcErr = 'RC: ' + String(e.message || e.error_description || JSON.stringify(e)).slice(0, 150);\n    continue;\n  }\n  for (const rec of (r.records || [])) {\n    if (rec.direction !== 'Outbound') continue;\n    for (const to of (rec.to || [])) {\n      const d = String(to.phoneNumber || '').replace(/\\D/g, '');\n      if (d.length >= 10) sentTo.add(d.slice(-10));\n    }\n  }\n}\n\nlet rows = sheet.rows || [];\nlet notice = '';\nif (rcErr) {\n  notice = 'Welcome-SMS check unavailable (' + rcErr + ')';\n} else {\n  rows = rows.map(r => {\n    let p = '';\n    for (const [k, v] of Object.entries(r)) {\n      if (!/phone/i.test(k)) continue;\n      const d = String(v || '').replace(/\\D/g, '');\n      if (d.length >= 10) { p = d.slice(-10); break; }\n    }\n    return { ...r, 'Welcome SMS': p && sentTo.has(p) ? '💬 sent' : '' };\n  });\n  notice = 'Welcome-SMS column covers RingCentral messages from the last 90 days';\n}\n\nreturn [{ json: { ...sheet, rows, count: rows.length, notice } }];\n"
+      }
+    },
+    {
       "name": "Respond Sheet Rows",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        1480,
+        2000,
         -360
       ],
       "parameters": {
@@ -483,7 +572,7 @@
         -220
       ],
       "parameters": {
-        "jsCode": "// Lookup: поиск лида в Zoho по телефону (варианты номера) или по имени (word search).\n// Если прислали целый текст анкеты — телефон извлекается из него автоматически.\nconst q = $json.query || {};\nconst term = String(q.lookup || '').trim().slice(0, 3000);\n\nfunction extractPhone(text) {\n  const total = text.replace(/\\D/g, '');\n  if (total.length === 10) return total;\n  if (total.length === 11 && total.startsWith('1')) return total.slice(1);\n  for (const line of text.split(/\\n+/)) {\n    const l = line.replace(/[a-zA-Z0-9._%+-]+@[^\\s]+/g, ' ');\n    const mm = l.match(/\\(?\\d{3}\\)?[\\s.\\-]\\d{3}[\\s.\\-]\\d{4}/);\n    if (mm) { const d = mm[0].replace(/\\D/g, ''); if (d.length === 10) return d; }\n    for (const tok of l.split(/[\\s,]+/)) {\n      const d = tok.replace(/\\D/g, '');\n      if (d.length === 5 && /^\\d{5}$/.test(d)) continue;\n      if (tok.includes('@')) continue;\n      if (/^\\d{1,2}[\\/.\\-]\\d{1,2}/.test(tok)) continue;\n      if (d.length === 10) return d;\n      if (d.length === 11 && d.startsWith('1')) return d.slice(1);\n    }\n  }\n  return null;\n}\n\nconst extracted = extractPhone(term);\nconst digits = extracted || term.replace(/\\D/g, '');\nlet dealsUrl, contactsUrl;\n\nif (extracted || (digits.length >= 7 && digits.length >= term.replace(/[\\s()+.\\-]/g, '').length - 1)) {\n  const variants = new Set();\n  if (digits.length === 10) {\n    ['+1' + digits, digits, '1' + digits].forEach(v => variants.add(v));\n  } else if (digits.length === 11 && digits.startsWith('1')) {\n    const n = digits.slice(1);\n    ['+1' + n, n, digits, '+' + digits].forEach(v => variants.add(v));\n  } else {\n    variants.add(digits);\n    variants.add('+' + digits);\n  }\n  const crit = '(' + [...variants].map(v => `(Phone:equals:${v})`).join('or') + ')';\n  const enc = encodeURIComponent(crit);\n  dealsUrl = `https://www.zohoapis.com/crm/v2/Deals/search?criteria=${enc}&per_page=20`;\n  contactsUrl = `https://www.zohoapis.com/crm/v2/Contacts/search?criteria=${enc}&per_page=20`;\n} else {\n  const word = encodeURIComponent(term);\n  dealsUrl = `https://www.zohoapis.com/crm/v2/Deals/search?word=${word}&per_page=20`;\n  contactsUrl = `https://www.zohoapis.com/crm/v2/Contacts/search?word=${word}&per_page=20`;\n}\n\nreturn [{ json: { dealsUrl, contactsUrl, term } }];\n"
+        "jsCode": "// Lookup: поиск лида в Zoho по телефону (варианты номера) или по имени (word search).\n// Если прислали целый текст анкеты — телефон извлекается из него автоматически.\nconst q = $json.query || {};\nconst term = String(q.lookup || '').trim().slice(0, 3000);\n\nfunction extractPhone(text) {\n  const total = text.replace(/\\D/g, '');\n  if (total.length === 10) return total;\n  if (total.length === 11 && total.startsWith('1')) return total.slice(1);\n  for (const line of text.split(/\\n+/)) {\n    const l = line.replace(/[a-zA-Z0-9._%+-]+@[^\\s]+/g, ' ');\n    const mm = l.match(/\\(?\\d{3}\\)?[\\s.\\-]\\d{3}[\\s.\\-]\\d{4}/);\n    if (mm) { const d = mm[0].replace(/\\D/g, ''); if (d.length === 10) return d; }\n    for (const tok of l.split(/[\\s,]+/)) {\n      const d = tok.replace(/\\D/g, '');\n      if (d.length === 5 && /^\\d{5}$/.test(d)) continue;\n      if (tok.includes('@')) continue;\n      if (/^\\d{1,2}[\\/.\\-]\\d{1,2}/.test(tok)) continue;\n      if (d.length === 10) return d;\n      if (d.length === 11 && d.startsWith('1')) return d.slice(1);\n    }\n  }\n  return null;\n}\n\nconst extracted = extractPhone(term);\nconst digits = extracted || term.replace(/\\D/g, '');\nlet dealsUrl, contactsUrl;\n\nif (extracted || (digits.length >= 7 && digits.length >= term.replace(/[\\s()+.\\-]/g, '').length - 1)) {\n  const variants = new Set();\n  if (digits.length === 10) {\n    ['+1' + digits, digits, '1' + digits].forEach(v => variants.add(v));\n  } else if (digits.length === 11 && digits.startsWith('1')) {\n    const n = digits.slice(1);\n    ['+1' + n, n, digits, '+' + digits].forEach(v => variants.add(v));\n  } else {\n    variants.add(digits);\n    variants.add('+' + digits);\n  }\n  const crit = '(' + [...variants].map(v => `(Phone:equals:${v})`).join('or') + ')';\n  const enc = encodeURIComponent(crit);\n  dealsUrl = `https://www.zohoapis.com/crm/v2/Deals/search?criteria=${enc}&per_page=20`;\n  contactsUrl = `https://www.zohoapis.com/crm/v2/Contacts/search?criteria=${enc}&per_page=20`;\n} else {\n  const word = encodeURIComponent(term);\n  dealsUrl = `https://www.zohoapis.com/crm/v2/Deals/search?word=${word}&per_page=20`;\n  contactsUrl = `https://www.zohoapis.com/crm/v2/Contacts/search?word=${word}&per_page=20`;\n}\n\nconst phone10 = (extracted || '').slice(-10)\n  || ((digits.length === 10 || digits.length === 11) ? digits.slice(-10) : '');\nreturn [{ json: { dealsUrl, contactsUrl, term, phone10 } }];\n"
       }
     },
     {
@@ -537,15 +626,81 @@
       }
     },
     {
-      "name": "Merge Lookup",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "name": "RC: Mint Token (Lookup)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [
         1260,
         -220
       ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
       "parameters": {
-        "jsCode": "// Сводим результаты поиска Deals + Contacts в детальные карточки (все непустые поля)\nconst dealsResp = $('Zoho: Lookup Deals').first().json || {};\nconst contactsResp = $input.first().json || {};\n\nconst clean = (rec) => {\n  const out = {};\n  for (const [k, v] of Object.entries(rec)) {\n    if (k.startsWith('$')) continue;\n    if (v === null || v === undefined || v === '') continue;\n    if (Array.isArray(v)) {\n      if (v.length) out[k] = v.map(x => (x && (x.name || x.id)) || x).join(', ');\n    } else if (typeof v === 'object') {\n      if (v.name) out[k] = v.name;\n      else if (v.id) out[k] = v.id;\n    } else {\n      out[k] = v;\n    }\n  }\n  return out;\n};\nconst pickErr = (resp) => {\n  if (resp.error) return String(resp.error.message || resp.error.description || JSON.stringify(resp.error)).slice(0, 200);\n  if (resp.code && resp.message) return (resp.code + ' ' + resp.message).slice(0, 200);\n  return '';\n};\n\nconst deals = (Array.isArray(dealsResp.data) ? dealsResp.data : []).map(clean);\nconst contacts = (Array.isArray(contactsResp.data) ? contactsResp.data : []).map(clean);\nconst error = pickErr(dealsResp) || pickErr(contactsResp);\n\nreturn [{\n  json: {\n    ok: !error,\n    error,\n    term: $('Build Lookup').first().json.term,\n    deals,\n    contacts,\n  },\n}];\n"
+        "method": "POST",
+        "url": "https://platform.ringcentral.com/restapi/oauth/token",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "grant_type",
+              "value": "urn:ietf:params:oauth:grant-type:jwt-bearer"
+            },
+            {
+              "name": "assertion",
+              "value": "={{ $vars.RC_JWT_ASSERTION || $env.RC_JWT_ASSERTION || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "NGzTKetSf4HMBiX7",
+          "name": "RingCentral Basic"
+        }
+      }
+    },
+    {
+      "name": "RC: SMS To Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        -220
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "url": "={{ 'https://platform.ringcentral.com/restapi/v1.0/account/~/extension/~/message-store?messageType=SMS&direction=Outbound&perPage=100&dateFrom=' + encodeURIComponent($now.minus({days:90}).toUTC().toISO({suppressMilliseconds:true})) + ($('Build Lookup').item.json.phone10 ? '&phoneNumber=%2B1' + $('Build Lookup').item.json.phone10 : '') }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.access_token || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      }
+    },
+    {
+      "name": "Merge Lookup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1620,
+        -220
+      ],
+      "parameters": {
+        "jsCode": "// Сводим результаты поиска Deals + Contacts + исходящие RC SMS в один ответ\nconst dealsResp = $('Zoho: Lookup Deals').first().json || {};\nconst contactsResp = $('Zoho: Lookup Contacts').first().json || {};\nconst rcItems = $input.all();\nconst searchedPhone = String($('Build Lookup').first().json.phone10 || '');\n\nconst clean = (rec) => {\n  const out = {};\n  for (const [k, v] of Object.entries(rec)) {\n    if (k.startsWith('$')) continue;\n    if (v === null || v === undefined || v === '') continue;\n    if (Array.isArray(v)) {\n      if (v.length) out[k] = v.map(x => (x && (x.name || x.id)) || x).join(', ');\n    } else if (typeof v === 'object') {\n      if (v.name) out[k] = v.name;\n      else if (v.id) out[k] = v.id;\n    } else {\n      out[k] = v;\n    }\n  }\n  return out;\n};\nconst pickErr = (resp) => {\n  if (resp.error) return String(resp.error.message || resp.error.description || JSON.stringify(resp.error)).slice(0, 200);\n  if (resp.code && resp.message) return (resp.code + ' ' + resp.message).slice(0, 200);\n  return '';\n};\n\nconst deals = (Array.isArray(dealsResp.data) ? dealsResp.data : []).map(clean);\nconst contacts = (Array.isArray(contactsResp.data) ? contactsResp.data : []).map(clean);\nconst error = pickErr(dealsResp) || pickErr(contactsResp);\n\n// --- Исходящие RingCentral SMS этому лиду ---\nlet rcError = '';\nconst rcMsgs = [];\nfor (const it of rcItems) {\n  const r = it.json || {};\n  if (r.error) {\n    const e = r.error;\n    rcError = 'RC: ' + String(e.message || e.error_description || JSON.stringify(e)).slice(0, 180);\n    if (/token|401|assertion|invalid_grant/i.test(rcError)) rcError += ' — check the RC_JWT_ASSERTION variable in n8n';\n    continue;\n  }\n  for (const rec of (r.records || [])) {\n    if (rec.direction !== 'Outbound') continue;\n    rcMsgs.push({\n      time: rec.creationTime || '',\n      to: (rec.to || []).map(t => String(t.phoneNumber || '').replace(/\\D/g, '').slice(-10)),\n      text: String(rec.subject || '').slice(0, 600),\n    });\n  }\n}\nconst interest = new Set();\nif (searchedPhone.length === 10) interest.add(searchedPhone);\nfor (const r of [...deals, ...contacts]) {\n  const d = String(r.Phone || '').replace(/\\D/g, '');\n  if (d.length >= 10) interest.add(d.slice(-10));\n}\nconst matched = rcMsgs\n  .filter(m => m.to.some(t => interest.has(t)))\n  .map(m => ({ time: m.time, text: m.text }));\nmatched.sort((a, b) => String(b.time).localeCompare(String(a.time)));\n\nreturn [{\n  json: {\n    ok: !error,\n    error,\n    term: $('Build Lookup').first().json.term,\n    deals,\n    contacts,\n    rc_sms: {\n      checked: !rcError,\n      error: rcError,\n      sent: matched.length > 0,\n      messages: matched.slice(0, 5),\n    },\n  },\n}];\n"
       }
     },
     {
@@ -553,7 +708,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        1460,
+        1800,
         -220
       ],
       "parameters": {
@@ -1090,6 +1245,39 @@
       "main": [
         [
           {
+            "node": "RC: Mint Token (Sheets)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RC: Mint Token (Sheets)": {
+      "main": [
+        [
+          {
+            "node": "RC: Sheets Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RC: Sheets Messages": {
+      "main": [
+        [
+          {
+            "node": "Mark Sheet Welcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Sheet Welcome": {
+      "main": [
+        [
+          {
             "node": "Respond Sheet Rows",
             "type": "main",
             "index": 0
@@ -1138,6 +1326,28 @@
       ]
     },
     "Zoho: Lookup Contacts": {
+      "main": [
+        [
+          {
+            "node": "RC: Mint Token (Lookup)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RC: Mint Token (Lookup)": {
+      "main": [
+        [
+          {
+            "node": "RC: SMS To Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RC: SMS To Lead": {
       "main": [
         [
           {
