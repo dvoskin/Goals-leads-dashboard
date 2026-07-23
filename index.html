@@ -122,16 +122,33 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
   <div class="card">
     <h2 style="margin-top:0;font-size:18px">📈 Zoho stages</h2>
     <div class="toolbar">
-      <input type="date" id="rpFrom" style="max-width:160px">
-      <input type="date" id="rpTo" style="max-width:160px">
-      <button class="btn ghost" onclick="rpToday()">Today</button>
-      <button class="btn" onclick="loadReport2()">Load</button>
+      <button class="btn ghost" onclick="loadReport2()">↻ Refresh</button>
       <span class="muted" id="rpHint" style="font-size:12.5px"></span>
     </div>
+    <h3 style="font-size:15px;margin:10px 0 8px">Quote Sent</h3>
     <div class="stats">
-      <div class="stat"><b id="rpQuote">—</b>Quote Sent</div>
-      <div class="stat"><b id="rpRetainer">—</b>Retainer Invoice Sent</div>
+      <div class="stat"><b id="qsToday">—</b>today</div>
+      <div class="stat"><b id="qsYest">—</b>yesterday</div>
+      <div class="stat"><b id="qsWeek">—</b>last 7 days</div>
     </div>
+    <h3 style="font-size:15px;margin:10px 0 8px">Retainer Invoice Sent</h3>
+    <div class="stats">
+      <div class="stat"><b id="risToday">—</b>today</div>
+      <div class="stat"><b id="risYest">—</b>yesterday</div>
+      <div class="stat"><b id="risWeek">—</b>last 7 days</div>
+    </div>
+    <h3 style="font-size:15px;margin:14px 0 8px">Pick a day or period</h3>
+    <div class="toolbar">
+      <input type="date" id="rpFrom" style="max-width:160px">
+      <input type="date" id="rpTo" style="max-width:160px">
+      <button class="btn" onclick="loadReport2Custom()">Load</button>
+      <span class="muted" id="rpCustomHint" style="font-size:12.5px"></span>
+    </div>
+    <div class="stats">
+      <div class="stat"><b id="qsCustom">—</b>Quote Sent</div>
+      <div class="stat"><b id="risCustom">—</b>Retainer Invoice Sent</div>
+    </div>
+    <p class="muted" style="font-size:12.5px;margin:8px 0 0">Counted as: deals currently in the stage whose last modification falls in the period (New York dates).</p>
   </div>
   <div class="card">
     <h3 style="margin-top:0;font-size:16px">Sheet «Report» — DEAL CREATOR CHAT TRACKER</h3>
@@ -336,7 +353,7 @@ let r2Loaded=false,fbLoaded=false;
 function showTab(t){
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.tab===t));
   ALL_TABS.forEach(x=>document.getElementById('tab-'+x).style.display=x===t?'':'none');
-  if(t==='report2'&&!r2Loaded&&cfg.report){r2Loaded=true;rpToday();loadReportSheet();}
+  if(t==='report2'&&!r2Loaded&&cfg.report){r2Loaded=true;document.getElementById('rpFrom').value=todayNY();document.getElementById('rpTo').value=todayNY();loadReport2();loadReportSheet();}
   if(t==='fbform'&&!fbLoaded&&cfg.report){fbLoaded=true;loadFbForm();}
 }
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
@@ -825,23 +842,60 @@ function drawTable(theadId,tbodyId,rowsArr){
 }
 
 // ---------- Report tab (Zoho stage stats + Report sheet) ----------
-function rpToday(){
-  document.getElementById('rpFrom').value=todayNY();
-  document.getElementById('rpTo').value=todayNY();
-  loadReport2();
+function nyShift(days){
+  const [y,m,d]=todayNY().split('-').map(Number);
+  const dt=new Date(Date.UTC(y,m-1,d));
+  dt.setUTCDate(dt.getUTCDate()+days);
+  return dt.toISOString().slice(0,10);
+}
+async function statsRange(from,to){
+  const data=await sheetsFetch({stats:'1',from,to});
+  return {
+    q:(data.quote_sent?.count??0)+(data.quote_sent?.capped?'+':''),
+    r:(data.retainer_sent?.count??0)+(data.retainer_sent?.capped?'+':''),
+  };
 }
 async function loadReport2(){
   const hint=document.getElementById('rpHint');
   if(!cfg.report){ hint.textContent='Set the report webhook URL in Settings first.'; return; }
+  const t=todayNY(),y=nyShift(-1),w=nyShift(-6);
+  const ids=[['qsToday','risToday'],['qsYest','risYest'],['qsWeek','risWeek']];
+  ids.flat().forEach(id=>document.getElementById(id).textContent='…');
+  hint.textContent='loading…';
+  const ranges=[[t,t],[y,y],[w,t]];
+  const results=await Promise.allSettled(ranges.map(([f,tt])=>statsRange(f,tt)));
+  let err='';
+  results.forEach((res,i)=>{
+    const [qId,rId]=ids[i];
+    if(res.status==='fulfilled'){
+      document.getElementById(qId).textContent=res.value.q;
+      document.getElementById(rId).textContent=res.value.r;
+    }else{
+      document.getElementById(qId).textContent='✗';
+      document.getElementById(rId).textContent='✗';
+      err=res.reason&&res.reason.message||'request failed';
+    }
+  });
+  hint.textContent=err?('error: '+err):('today '+t+' · yesterday '+y+' · week '+w+' → '+t+' (NY)');
+}
+async function loadReport2Custom(){
+  const hint=document.getElementById('rpCustomHint');
+  if(!cfg.report){ hint.textContent='Set the report webhook URL in Settings first.'; return; }
   const f=document.getElementById('rpFrom').value||todayNY();
   const t=document.getElementById('rpTo').value||f;
+  document.getElementById('qsCustom').textContent='…';
+  document.getElementById('risCustom').textContent='…';
   hint.textContent='loading…';
   try{
-    const data=await sheetsFetch({stats:'1',from:f,to:t});
-    document.getElementById('rpQuote').textContent=(data.quote_sent?.count??0)+(data.quote_sent?.capped?'+':'');
-    document.getElementById('rpRetainer').textContent=(data.retainer_sent?.count??0)+(data.retainer_sent?.capped?'+':'');
-    hint.textContent='deals that reached the stage between '+f+' and '+t+' (NY, by last modification)';
-  }catch(e){ hint.textContent='error: '+e.message; }
+    const v=await statsRange(f,t);
+    document.getElementById('qsCustom').textContent=v.q;
+    document.getElementById('risCustom').textContent=v.r;
+    hint.textContent=f===t?f:(f+' → '+t);
+  }catch(e){
+    document.getElementById('qsCustom').textContent='✗';
+    document.getElementById('risCustom').textContent='✗';
+    hint.textContent='error: '+e.message;
+  }
 }
 async function loadReportSheet(){
   const hint=document.getElementById('rpShHint');
