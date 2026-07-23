@@ -881,7 +881,7 @@
         360
       ],
       "parameters": {
-        "jsCode": "// Режим \"Report\": критерии поиска сделок по стадиям за период (по Modified_Time, NY).\n// Криterии отдаём СЫРЫМИ (без encodeURIComponent) — HTTP-нода передаёт их\n// через query-параметр, и n8n кодирует один раз правильно. Без between (без запятых).\nconst q = $json.query || {};\nconst NY = 'America/New_York';\nconst re = /^\\d{4}-\\d{2}-\\d{2}$/;\nconst fromStr = re.test(String(q.from || '')) ? q.from : DateTime.now().setZone(NY).toFormat('yyyy-MM-dd');\nconst toStr = re.test(String(q.to || '')) ? q.to : fromStr;\nconst fromISO = DateTime.fromISO(fromStr, { zone: NY }).startOf('day').toISO({ suppressMilliseconds: true });\nconst toISO = DateTime.fromISO(toStr, { zone: NY }).endOf('day').set({ millisecond: 0 }).toISO({ suppressMilliseconds: true });\n// Zoho требует экранировать спецсимволы (двоеточия и т.п.) внутри значений criteria\nconst escVal = (s) => String(s).replace(/([(),:])/g, '\\\\$1');\nconst mk = (stage) => `((Stage:equals:${stage})and(Modified_Time:greater_equal:${escVal(fromISO)})and(Modified_Time:less_equal:${escVal(toISO)}))`;\nreturn [{\n  json: {\n    from: fromStr,\n    to: toStr,\n    quoteCriteria: mk('Quote Sent'),\n    retainerCriteria: mk('Retainer Invoice Sent'),\n  },\n}];\n"
+        "jsCode": "// Режим \"Report\": критерии поиска сделок по стадиям за период (по Modified_Time, NY).\n// Криterии отдаём СЫРЫМИ (без encodeURIComponent) — HTTP-нода передаёт их\n// через query-параметр, и n8n кодирует один раз правильно. Без between (без запятых).\nconst q = $json.query || {};\nconst NY = 'America/New_York';\nconst re = /^\\d{4}-\\d{2}-\\d{2}$/;\nconst fromStr = re.test(String(q.from || '')) ? q.from : DateTime.now().setZone(NY).toFormat('yyyy-MM-dd');\nconst toStr = re.test(String(q.to || '')) ? q.to : fromStr;\nconst fromISO = DateTime.fromISO(fromStr, { zone: NY }).startOf('day').toISO({ suppressMilliseconds: true });\nconst toISO = DateTime.fromISO(toStr, { zone: NY }).endOf('day').set({ millisecond: 0 }).toISO({ suppressMilliseconds: true });\nconst mk = (stage) => `((Stage:equals:${stage})and(Modified_Time:greater_equal:${fromISO})and(Modified_Time:less_equal:${toISO}))`;\nreturn [{\n  json: {\n    from: fromStr,\n    to: toStr,\n    quoteCriteria: mk('Quote Sent'),\n    retainerCriteria: mk('Retainer Invoice Sent'),\n  },\n}];\n"
       }
     },
     {
@@ -895,22 +895,9 @@
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
       "parameters": {
-        "url": "https://www.zohoapis.com/crm/v2/Deals/search",
+        "url": "=https://www.zohoapis.com/crm/v2/Deals/search?per_page=200&criteria={{ $json.quoteCriteria }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "zohoOAuth2Api",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "criteria",
-              "value": "={{ $json.quoteCriteria }}"
-            },
-            {
-              "name": "per_page",
-              "value": "200"
-            }
-          ]
-        },
         "options": {
           "timeout": 20000
         }
@@ -933,22 +920,9 @@
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
       "parameters": {
-        "url": "https://www.zohoapis.com/crm/v2/Deals/search",
+        "url": "=https://www.zohoapis.com/crm/v2/Deals/search?per_page=200&criteria={{ $('Build Stats Query').item.json.retainerCriteria }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "zohoOAuth2Api",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "criteria",
-              "value": "={{ $('Build Stats Query').item.json.retainerCriteria }}"
-            },
-            {
-              "name": "per_page",
-              "value": "200"
-            }
-          ]
-        },
         "options": {
           "timeout": 20000
         }
@@ -1043,7 +1017,7 @@
         240
       ],
       "parameters": {
-        "jsCode": "// Режим \"звонки за период\": сырые criteria (кодирует HTTP-нода), без between.\nconst q = $json.query || {};\nconst NY = 'America/New_York';\nconst re = /^\\d{4}-\\d{2}-\\d{2}$/;\nconst fromStr = re.test(String(q.calls_from || '')) ? q.calls_from : DateTime.now().setZone(NY).toFormat('yyyy-MM-dd');\nconst toStr = re.test(String(q.calls_to || '')) ? q.calls_to : fromStr;\nconst fromISO = DateTime.fromISO(fromStr, { zone: NY }).startOf('day').toISO({ suppressMilliseconds: true });\nconst toISO = DateTime.fromISO(toStr, { zone: NY }).endOf('day').set({ millisecond: 0 }).toISO({ suppressMilliseconds: true });\n\n// Zoho требует экранировать спецсимволы (двоеточия и т.п.) внутри значений criteria\nconst escVal = (s) => String(s).replace(/([(),:])/g, '\\\\$1');\nreturn [{\n  json: {\n    from: fromStr,\n    to: toStr,\n    scheduledCriteria: `((Call_Scheduled_Date_Time:greater_equal:${escVal(fromISO)})and(Call_Scheduled_Date_Time:less_equal:${escVal(toISO)}))`,\n    callNowCriteria: `((Best_Contact_Time:equals:CALL NOW)and(Created_Time:greater_equal:${escVal(fromISO)})and(Created_Time:less_equal:${escVal(toISO)}))`,\n  },\n}];\n"
+        "jsCode": "// Режим \"звонки за период\": сырые criteria (кодирует HTTP-нода), без between.\nconst q = $json.query || {};\nconst NY = 'America/New_York';\nconst re = /^\\d{4}-\\d{2}-\\d{2}$/;\nconst fromStr = re.test(String(q.calls_from || '')) ? q.calls_from : DateTime.now().setZone(NY).toFormat('yyyy-MM-dd');\nconst toStr = re.test(String(q.calls_to || '')) ? q.calls_to : fromStr;\nconst fromISO = DateTime.fromISO(fromStr, { zone: NY }).startOf('day').toISO({ suppressMilliseconds: true });\nconst toISO = DateTime.fromISO(toStr, { zone: NY }).endOf('day').set({ millisecond: 0 }).toISO({ suppressMilliseconds: true });\n\nreturn [{\n  json: {\n    from: fromStr,\n    to: toStr,\n    scheduledCriteria: `((Call_Scheduled_Date_Time:greater_equal:${fromISO})and(Call_Scheduled_Date_Time:less_equal:${toISO}))`,\n    callNowCriteria: `((Best_Contact_Time:equals:CALL NOW)and(Created_Time:greater_equal:${fromISO})and(Created_Time:less_equal:${toISO}))`,\n  },\n}];\n"
       }
     },
     {
@@ -1057,22 +1031,9 @@
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
       "parameters": {
-        "url": "https://www.zohoapis.com/crm/v2/Deals/search",
+        "url": "=https://www.zohoapis.com/crm/v2/Deals/search?per_page=200&criteria={{ $json.scheduledCriteria }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "zohoOAuth2Api",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "criteria",
-              "value": "={{ $json.scheduledCriteria }}"
-            },
-            {
-              "name": "per_page",
-              "value": "200"
-            }
-          ]
-        },
         "options": {
           "timeout": 20000
         }
@@ -1095,22 +1056,9 @@
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
       "parameters": {
-        "url": "https://www.zohoapis.com/crm/v2/Deals/search",
+        "url": "=https://www.zohoapis.com/crm/v2/Deals/search?per_page=200&criteria={{ $('Build Calls Query').item.json.callNowCriteria }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "zohoOAuth2Api",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "criteria",
-              "value": "={{ $('Build Calls Query').item.json.callNowCriteria }}"
-            },
-            {
-              "name": "per_page",
-              "value": "200"
-            }
-          ]
-        },
         "options": {
           "timeout": 20000
         }
