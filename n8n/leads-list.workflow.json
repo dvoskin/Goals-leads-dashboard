@@ -881,50 +881,44 @@
         360
       ],
       "parameters": {
-        "jsCode": "// Режим \"Report\": критерии поиска сделок по стадиям за период (по Modified_Time, NY).\n// Криterии отдаём СЫРЫМИ (без encodeURIComponent) — HTTP-нода передаёт их\n// через query-параметр, и n8n кодирует один раз правильно. Без between (без запятых).\nconst q = $json.query || {};\nconst NY = 'America/New_York';\nconst re = /^\\d{4}-\\d{2}-\\d{2}$/;\nconst fromStr = re.test(String(q.from || '')) ? q.from : DateTime.now().setZone(NY).toFormat('yyyy-MM-dd');\nconst toStr = re.test(String(q.to || '')) ? q.to : fromStr;\nconst fromISO = DateTime.fromISO(fromStr, { zone: NY }).startOf('day').toISO({ suppressMilliseconds: true });\nconst toISO = DateTime.fromISO(toStr, { zone: NY }).endOf('day').set({ millisecond: 0 }).toISO({ suppressMilliseconds: true });\nconst mk = (stage) => `((Stage:equals:${stage})and(Modified_Time:greater_equal:${fromISO})and(Modified_Time:less_equal:${toISO}))`;\nreturn [{\n  json: {\n    from: fromStr,\n    to: toStr,\n    quoteCriteria: mk('Quote Sent'),\n    retainerCriteria: mk('Retainer Invoice Sent'),\n  },\n}];\n"
+        "jsCode": "// Режим \"Report\": диапазоны для подсчёта стадий. Без criteria-поиска —\n// сделки берутся постранично (GET /Deals, sort by Modified_Time desc),\n// а фильтрация по стадии и датам выполняется кодом в Merge Stats.\nconst q = $json.query || {};\nconst NY = 'America/New_York';\nconst re = /^\\d{4}-\\d{2}-\\d{2}$/;\nconst now = DateTime.now().setZone(NY);\nconst day = (s) => DateTime.fromISO(s, { zone: NY });\nconst iso = (d) => d.toISO({ suppressMilliseconds: true });\n\nlet mode = 'multi';\nlet ranges = {};\nlet windowFrom, windowTo;\n\nif (re.test(String(q.from || '')) || re.test(String(q.to || ''))) {\n  mode = 'single';\n  const f = re.test(String(q.from || '')) ? q.from : now.toFormat('yyyy-MM-dd');\n  const t = re.test(String(q.to || '')) ? q.to : f;\n  const a = day(f).startOf('day');\n  const b = day(t).endOf('day').set({ millisecond: 0 });\n  ranges = { custom: [a, b] };\n  windowFrom = a; windowTo = b;\n} else {\n  const today = now.startOf('day');\n  const y = today.minus({ days: 1 });\n  ranges = {\n    today: [today, today.endOf('day').set({ millisecond: 0 })],\n    yesterday: [y, y.endOf('day').set({ millisecond: 0 })],\n    week: [today.minus({ days: 6 }), today.endOf('day').set({ millisecond: 0 })],\n  };\n  windowFrom = ranges.week[0]; windowTo = ranges.week[1];\n}\n\nconst out = {\n  mode,\n  from: windowFrom.toFormat('yyyy-MM-dd'),\n  to: windowTo.toFormat('yyyy-MM-dd'),\n  fromISO: iso(windowFrom),\n  toISO: iso(windowTo),\n  ranges: {},\n};\nfor (const [k, [a, b]] of Object.entries(ranges)) out.ranges[k] = [iso(a), iso(b)];\nreturn [{ json: out }];\n"
       }
     },
     {
-      "name": "Zoho: Quote Sent",
+      "name": "Zoho: Modified Deals",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1180,
+        1220,
         360
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
       "parameters": {
-        "url": "=https://www.zohoapis.com/crm/v2/Deals/search?per_page=200&criteria={{ $json.quoteCriteria }}",
+        "url": "https://www.zohoapis.com/crm/v2/Deals?fields=Stage,Modified_Time&per_page=200&sort_by=Modified_Time&sort_order=desc",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "zohoOAuth2Api",
         "options": {
-          "timeout": 20000
-        }
-      },
-      "credentials": {
-        "zohoOAuth2Api": {
-          "id": "8aqN9treZ1cKRtr2",
-          "name": "Zoho account"
-        }
-      }
-    },
-    {
-      "name": "Zoho: Retainer Sent",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        1360,
-        360
-      ],
-      "alwaysOutputData": true,
-      "onError": "continueRegularOutput",
-      "parameters": {
-        "url": "=https://www.zohoapis.com/crm/v2/Deals/search?per_page=200&criteria={{ $('Build Stats Query').item.json.retainerCriteria }}",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "zohoOAuth2Api",
-        "options": {
-          "timeout": 20000
+          "timeout": 30000,
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "page",
+                    "value": "={{ $pageCount + 1 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.data || $response.body.data.length < 200 || $response.body.data[$response.body.data.length - 1].Modified_Time < $('Build Stats Query').item.json.fromISO }}",
+              "limitPagesFetched": true,
+              "maxRequests": 15,
+              "requestInterval": 120
+            }
+          }
         }
       },
       "credentials": {
@@ -943,7 +937,7 @@
         360
       ],
       "parameters": {
-        "jsCode": "// Ответ режима Report: количество Quote Sent и Retainer Invoice Sent за период\nconst quoteResp = $('Zoho: Quote Sent').first().json || {};\nconst retResp = $input.first().json || {};\nconst meta = $('Build Stats Query').first().json;\nconst pickErr = (r) => {\n  if (r.error) {\n    const e = r.error;\n    const parts = [e.message, e.description].filter(Boolean).join(' | ');\n    return String(parts || JSON.stringify(e)).slice(0, 400);\n  }\n  if (r.code && r.message) return (r.code + ' ' + r.message).slice(0, 400);\n  return '';\n};\nconst count = (r) => (Array.isArray(r.data) ? r.data.length : 0);\nconst rows = (r) => (Array.isArray(r.data) ? r.data : []).map(d => ({\n  deal: d.Deal_Name || '',\n  contact: (d.Contact_Name && d.Contact_Name.name) || '',\n  phone: d.Phone || '',\n  stage: d.Stage || '',\n  modified: d.Modified_Time || '',\n}));\nconst error = pickErr(quoteResp) && pickErr(retResp) ? 'Zoho: ' + pickErr(quoteResp) : '';\nreturn [{\n  json: {\n    ok: !error,\n    error,\n    from: meta.from,\n    to: meta.to,\n    quote_sent: { count: count(quoteResp), capped: count(quoteResp) >= 200, deals: rows(quoteResp).slice(0, 50) },\n    retainer_sent: { count: count(retResp), capped: count(retResp) >= 200, deals: rows(retResp).slice(0, 50) },\n  },\n}];\n"
+        "jsCode": "// Считаем Quote Sent / Retainer Invoice Sent по диапазонам из постраничной выборки\nconst pages = $input.all();\nconst meta = $('Build Stats Query').first().json;\n\nlet error = '';\nlet pagesCount = 0;\nconst deals = [];\nfor (const it of pages) {\n  const r = it.json || {};\n  if (r.error) {\n    const e = r.error;\n    error = 'Zoho: ' + String([e.message, e.description].filter(Boolean).join(' | ') || JSON.stringify(e)).slice(0, 400);\n    continue;\n  }\n  pagesCount++;\n  for (const d of (Array.isArray(r.data) ? r.data : [])) deals.push(d);\n}\nconst truncated = pagesCount >= 15;\nconst ms = (s) => Date.parse(s);\n\nconst result = {\n  ok: !error,\n  error,\n  mode: meta.mode,\n  from: meta.from,\n  to: meta.to,\n  scanned: deals.length,\n  truncated,\n};\nfor (const [k, [a, b]] of Object.entries(meta.ranges)) {\n  const am = ms(a), bm = ms(b);\n  let qc = 0, rc = 0;\n  for (const d of deals) {\n    const m = ms(d.Modified_Time);\n    if (isNaN(m) || m < am || m > bm) continue;\n    if (d.Stage === 'Quote Sent') qc++;\n    else if (d.Stage === 'Retainer Invoice Sent') rc++;\n  }\n  const obj = {\n    quote_sent: { count: qc, capped: truncated },\n    retainer_sent: { count: rc, capped: truncated },\n  };\n  if (meta.mode === 'single') {\n    result.quote_sent = obj.quote_sent;\n    result.retainer_sent = obj.retainer_sent;\n  } else {\n    result[k] = obj;\n  }\n}\nreturn [{ json: result }];\n"
       }
     },
     {
@@ -1017,50 +1011,44 @@
         240
       ],
       "parameters": {
-        "jsCode": "// Режим \"звонки за период\": сырые criteria (кодирует HTTP-нода), без between.\nconst q = $json.query || {};\nconst NY = 'America/New_York';\nconst re = /^\\d{4}-\\d{2}-\\d{2}$/;\nconst fromStr = re.test(String(q.calls_from || '')) ? q.calls_from : DateTime.now().setZone(NY).toFormat('yyyy-MM-dd');\nconst toStr = re.test(String(q.calls_to || '')) ? q.calls_to : fromStr;\nconst fromISO = DateTime.fromISO(fromStr, { zone: NY }).startOf('day').toISO({ suppressMilliseconds: true });\nconst toISO = DateTime.fromISO(toStr, { zone: NY }).endOf('day').set({ millisecond: 0 }).toISO({ suppressMilliseconds: true });\n\nreturn [{\n  json: {\n    from: fromStr,\n    to: toStr,\n    scheduledCriteria: `((Call_Scheduled_Date_Time:greater_equal:${fromISO})and(Call_Scheduled_Date_Time:less_equal:${toISO}))`,\n    callNowCriteria: `((Best_Contact_Time:equals:CALL NOW)and(Created_Time:greater_equal:${fromISO})and(Created_Time:less_equal:${toISO}))`,\n  },\n}];\n"
+        "jsCode": "// Режим \"звонки за период\": без criteria — берём недавно изменённые сделки\n// постранично и фильтруем по Call_Scheduled_Date_Time / CALL NOW кодом.\nconst q = $json.query || {};\nconst NY = 'America/New_York';\nconst re = /^\\d{4}-\\d{2}-\\d{2}$/;\nconst fromStr = re.test(String(q.calls_from || '')) ? q.calls_from : DateTime.now().setZone(NY).toFormat('yyyy-MM-dd');\nconst toStr = re.test(String(q.calls_to || '')) ? q.calls_to : fromStr;\nconst from = DateTime.fromISO(fromStr, { zone: NY }).startOf('day');\nconst to = DateTime.fromISO(toStr, { zone: NY }).endOf('day').set({ millisecond: 0 });\nconst iso = (d) => d.toISO({ suppressMilliseconds: true });\nreturn [{\n  json: {\n    from: fromStr,\n    to: toStr,\n    fromISO: iso(from),\n    toISO: iso(to),\n    // как глубоко листать по Modified_Time: звонок на дату X обычно назначен не раньше чем за 2 недели\n    floorISO: iso(from.minus({ days: 14 })),\n  },\n}];\n"
       }
     },
     {
-      "name": "Zoho: Calls Scheduled",
+      "name": "Zoho: Deals For Calls",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1360,
+        1400,
         240
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
       "parameters": {
-        "url": "=https://www.zohoapis.com/crm/v2/Deals/search?per_page=200&criteria={{ $json.scheduledCriteria }}",
+        "url": "https://www.zohoapis.com/crm/v2/Deals?fields=Stage,Modified_Time,Call_Scheduled_Date_Time,Best_Contact_Time,Created_Time,Deal_Name,Phone,Zip_Code,Lead_Source,Description,Contact_Name,Client_Timezone&per_page=200&sort_by=Modified_Time&sort_order=desc",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "zohoOAuth2Api",
         "options": {
-          "timeout": 20000
-        }
-      },
-      "credentials": {
-        "zohoOAuth2Api": {
-          "id": "8aqN9treZ1cKRtr2",
-          "name": "Zoho account"
-        }
-      }
-    },
-    {
-      "name": "Zoho: Calls Now",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        1540,
-        240
-      ],
-      "alwaysOutputData": true,
-      "onError": "continueRegularOutput",
-      "parameters": {
-        "url": "=https://www.zohoapis.com/crm/v2/Deals/search?per_page=200&criteria={{ $('Build Calls Query').item.json.callNowCriteria }}",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "zohoOAuth2Api",
-        "options": {
-          "timeout": 20000
+          "timeout": 30000,
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "page",
+                    "value": "={{ $pageCount + 1 }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.data || $response.body.data.length < 200 || $response.body.data[$response.body.data.length - 1].Modified_Time < $('Build Calls Query').item.json.floorISO }}",
+              "limitPagesFetched": true,
+              "maxRequests": 15,
+              "requestInterval": 120
+            }
+          }
         }
       },
       "credentials": {
@@ -1079,7 +1067,7 @@
         240
       ],
       "parameters": {
-        "jsCode": "// Объединяем два поиска (запланированные звонки + CALL NOW) и дедупим по id\nconst schedResp = $('Zoho: Calls Scheduled').first().json || {};\nconst nowResp = $input.first().json || {};\nconst pickErr = (r) => {\n  if (r.error) {\n    const e = r.error;\n    const parts = [e.message, e.description].filter(Boolean).join(' | ');\n    return String(parts || JSON.stringify(e)).slice(0, 400);\n  }\n  if (r.code && r.message) return (r.code + ' ' + r.message).slice(0, 400);\n  return '';\n};\nconst seen = new Set();\nconst data = [];\nfor (const resp of [schedResp, nowResp]) {\n  for (const d of (Array.isArray(resp.data) ? resp.data : [])) {\n    if (!d || !d.id || seen.has(d.id)) continue;\n    seen.add(d.id);\n    data.push(d);\n  }\n}\nconst e1 = pickErr(schedResp), e2 = pickErr(nowResp);\nconst error = (e1 && e2) ? ('Zoho: ' + e1) : '';\nreturn [{ json: error ? { error: { message: error } } : { data } }];\n"
+        "jsCode": "// Фильтруем постраничную выборку: звонки, назначенные на период, + CALL NOW, созданные в период\nconst pages = $input.all();\nconst meta = $('Build Calls Query').first().json;\n\nlet error = '';\nconst all = [];\nfor (const it of pages) {\n  const r = it.json || {};\n  if (r.error) {\n    const e = r.error;\n    error = 'Zoho: ' + String([e.message, e.description].filter(Boolean).join(' | ') || JSON.stringify(e)).slice(0, 400);\n    continue;\n  }\n  for (const d of (Array.isArray(r.data) ? r.data : [])) all.push(d);\n}\n\nconst fromMs = Date.parse(meta.fromISO);\nconst toMs = Date.parse(meta.toISO);\nconst inWin = (s) => { const m = Date.parse(s || ''); return !isNaN(m) && m >= fromMs && m <= toMs; };\n\nconst seen = new Set();\nconst data = [];\nfor (const d of all) {\n  if (!d || !d.id || seen.has(d.id)) continue;\n  const isNow = String(d.Best_Contact_Time || '').trim().toUpperCase() === 'CALL NOW';\n  const keep = inWin(d.Call_Scheduled_Date_Time) || (isNow && inWin(d.Created_Time));\n  if (!keep) continue;\n  seen.add(d.id);\n  data.push(d);\n}\n\nreturn [{ json: (error && all.length === 0) ? { error: { message: error } } : { data } }];\n"
       }
     },
     {
@@ -1653,25 +1641,14 @@
       "main": [
         [
           {
-            "node": "Zoho: Quote Sent",
+            "node": "Zoho: Modified Deals",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Zoho: Quote Sent": {
-      "main": [
-        [
-          {
-            "node": "Zoho: Retainer Sent",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Zoho: Retainer Sent": {
+    "Zoho: Modified Deals": {
       "main": [
         [
           {
@@ -1715,25 +1692,14 @@
       "main": [
         [
           {
-            "node": "Zoho: Calls Scheduled",
+            "node": "Zoho: Deals For Calls",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Zoho: Calls Scheduled": {
-      "main": [
-        [
-          {
-            "node": "Zoho: Calls Now",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Zoho: Calls Now": {
+    "Zoho: Deals For Calls": {
       "main": [
         [
           {

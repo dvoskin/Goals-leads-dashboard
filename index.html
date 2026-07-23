@@ -858,25 +858,23 @@ async function statsRange(from,to){
 async function loadReport2(){
   const hint=document.getElementById('rpHint');
   if(!cfg.report){ hint.textContent='Set the report webhook URL in Settings first.'; return; }
-  const t=todayNY(),y=nyShift(-1),w=nyShift(-6);
-  const ids=[['qsToday','risToday'],['qsYest','risYest'],['qsWeek','risWeek']];
-  ids.flat().forEach(id=>document.getElementById(id).textContent='…');
+  const ids=['qsToday','risToday','qsYest','risYest','qsWeek','risWeek'];
+  ids.forEach(id=>document.getElementById(id).textContent='…');
   hint.textContent='loading…';
-  const ranges=[[t,t],[y,y],[w,t]];
-  const results=await Promise.allSettled(ranges.map(([f,tt])=>statsRange(f,tt)));
-  let err='';
-  results.forEach((res,i)=>{
-    const [qId,rId]=ids[i];
-    if(res.status==='fulfilled'){
-      document.getElementById(qId).textContent=res.value.q;
-      document.getElementById(rId).textContent=res.value.r;
-    }else{
-      document.getElementById(qId).textContent='✗';
-      document.getElementById(rId).textContent='✗';
-      err=res.reason&&res.reason.message||'request failed';
-    }
-  });
-  hint.textContent=err?('error: '+err):('today '+t+' · yesterday '+y+' · week '+w+' → '+t+' (NY)');
+  try{
+    const data=await sheetsFetch({stats:'multi'});
+    const put=(idQ,idR,o)=>{
+      document.getElementById(idQ).textContent=(o?.quote_sent?.count??0)+(o?.quote_sent?.capped?'+':'');
+      document.getElementById(idR).textContent=(o?.retainer_sent?.count??0)+(o?.retainer_sent?.capped?'+':'');
+    };
+    put('qsToday','risToday',data.today);
+    put('qsYest','risYest',data.yesterday);
+    put('qsWeek','risWeek',data.week);
+    hint.textContent='window '+data.from+' → '+data.to+' (NY) · scanned '+(data.scanned||0)+' recently modified deals'+(data.truncated?' · older changes beyond scan depth marked with +':'');
+  }catch(e){
+    ids.forEach(id=>document.getElementById(id).textContent='✗');
+    hint.textContent='error: '+e.message;
+  }
 }
 async function loadReport2Custom(){
   const hint=document.getElementById('rpCustomHint');
