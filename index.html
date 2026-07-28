@@ -76,16 +76,36 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
 </header>
 
 <nav>
-  <button data-tab="report" class="active">📞 <span id="navLeadsLabel">Leads · today</span></button>
+  <button data-tab="report" class="active">➕ <span id="navLeadsLabel">Add + Leads · today</span></button>
   <button data-tab="report2">📈 Report</button>
   <button data-tab="fbform">📘 Facebook Form</button>
+  <button data-tab="negcom">💬 Negative Comments</button>
+  <button data-tab="repform">📋 Report Form</button>
+  <button data-tab="repads">📣 Report Ads</button>
   <button data-tab="sheets">📑 Sheets</button>
   <button data-tab="lookup">🔍 Lookup</button>
-  <button data-tab="add">➕ New Lead</button>
 </nav>
 
-<!-- ============ LEADS (calls for date) ============ -->
+<!-- ============ ADD + LEADS (quick paste + calls for date) ============ -->
 <section id="tab-report">
+  <div class="card">
+    <h2 style="margin-top:0;font-size:18px">⚡ Quick Paste — same as Telegram</h2>
+    <label class="fld"><span>Paste lead text in any format: Facebook form answers, "name / phone / ZIP / time" lines, etc.</span>
+      <textarea id="pasteText" rows="7" placeholder="Kale Walker&#10;2149180251&#10;75126&#10;call now"></textarea></label>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <label class="btn ghost" style="cursor:pointer">📷 Attach photo<input type="file" id="pastePhoto" accept="image/*" style="display:none" onchange="onPastePhoto(this)"></label>
+      <button class="btn ghost" onclick="captureScreenTo('paste')">🖥 Screenshot a window</button>
+      <span id="pastePhotoInfo" class="muted" style="font-size:12.5px"></span>
+      <img id="pastePhotoPreview" style="display:none;max-height:56px;border-radius:8px;border:1px solid var(--line)">
+      <button class="btn ghost" id="pastePhotoClear" style="display:none" onclick="clearPastePhoto()">✕ Remove photo</button>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px">
+      <button class="btn" id="pasteSubmit" onclick="submitPaste()">Parse &amp; Create in Zoho</button>
+      <button class="btn ghost" onclick="pasteText.value='';pasteMsg.className='msg';clearPastePhoto()">Clear</button>
+      <span class="muted" style="font-size:12.5px">Text and/or a photo (chat screenshot, form, handwritten note) — AI extracts name, phone, ZIP, language and call time.</span>
+    </div>
+    <div class="msg" id="pasteMsg"></div>
+  </div>
   <div class="stats">
     <div class="stat"><b id="stTotal">0</b>leads</div>
     <div class="stat"><b id="stNow">0</b>CALL NOW</div>
@@ -117,39 +137,8 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
   </div>
 </section>
 
-<!-- ============ REPORT (stage stats + Report sheet) ============ -->
+<!-- ============ REPORT (Report sheet) ============ -->
 <section id="tab-report2" style="display:none">
-  <div class="card">
-    <h2 style="margin-top:0;font-size:18px">📈 Zoho stages</h2>
-    <div class="toolbar">
-      <button class="btn ghost" onclick="loadReport2()">↻ Refresh</button>
-      <span class="muted" id="rpHint" style="font-size:12.5px"></span>
-    </div>
-    <h3 style="font-size:15px;margin:10px 0 8px">Quote Sent</h3>
-    <div class="stats">
-      <div class="stat"><b id="qsToday">—</b>today</div>
-      <div class="stat"><b id="qsYest">—</b>yesterday</div>
-      <div class="stat"><b id="qsWeek">—</b>last 7 days</div>
-    </div>
-    <h3 style="font-size:15px;margin:10px 0 8px">Retainer Invoice Sent</h3>
-    <div class="stats">
-      <div class="stat"><b id="risToday">—</b>today</div>
-      <div class="stat"><b id="risYest">—</b>yesterday</div>
-      <div class="stat"><b id="risWeek">—</b>last 7 days</div>
-    </div>
-    <h3 style="font-size:15px;margin:14px 0 8px">Pick a day or period</h3>
-    <div class="toolbar">
-      <input type="date" id="rpFrom" style="max-width:160px">
-      <input type="date" id="rpTo" style="max-width:160px">
-      <button class="btn" onclick="loadReport2Custom()">Load</button>
-      <span class="muted" id="rpCustomHint" style="font-size:12.5px"></span>
-    </div>
-    <div class="stats">
-      <div class="stat"><b id="qsCustom">—</b>Quote Sent</div>
-      <div class="stat"><b id="risCustom">—</b>Retainer Invoice Sent</div>
-    </div>
-    <p class="muted" style="font-size:12.5px;margin:8px 0 0">Counted as: deals currently in the stage whose last modification falls in the period (New York dates).</p>
-  </div>
   <div class="card">
     <h3 style="margin-top:0;font-size:16px">Sheet «Report» — DEAL CREATOR CHAT TRACKER</h3>
     <div class="toolbar">
@@ -175,6 +164,54 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
       <table><thead><tr id="fbThead"></tr></thead><tbody id="fbTbody"></tbody></table>
     </div>
     <div class="note">Rows from the «Facebook Form» tab of DEAL CREATOR CHAT TRACKER created in the last 7 days, newest first.</div>
+  </div>
+</section>
+
+<!-- ============ NEGATIVE COMMENTS ============ -->
+<section id="tab-negcom" style="display:none">
+  <div class="card">
+    <h2 style="margin-top:0;font-size:18px">💬 Negative Comments</h2>
+    <div class="toolbar">
+      <input id="negcomSearch" placeholder="🔎 Filter rows…" style="max-width:220px">
+      <button class="btn ghost" onclick="loadGenericSheet('negcom')">↻ Refresh</button>
+      <span class="muted" id="negcomHint" style="font-size:12.5px"></span>
+    </div>
+    <div class="tablewrap">
+      <table><thead><tr id="negcomThead"></tr></thead><tbody id="negcomTbody"></tbody></table>
+    </div>
+    <div class="note">Rows from the «Negative Comments» tab of DEAL CREATOR CHAT TRACKER, newest first.</div>
+  </div>
+</section>
+
+<!-- ============ REPORT FORM ============ -->
+<section id="tab-repform" style="display:none">
+  <div class="card">
+    <h2 style="margin-top:0;font-size:18px">📋 Report Form</h2>
+    <div class="toolbar">
+      <input id="repformSearch" placeholder="🔎 Filter rows…" style="max-width:220px">
+      <button class="btn ghost" onclick="loadGenericSheet('repform')">↻ Refresh</button>
+      <span class="muted" id="repformHint" style="font-size:12.5px"></span>
+    </div>
+    <div class="tablewrap">
+      <table><thead><tr id="repformThead"></tr></thead><tbody id="repformTbody"></tbody></table>
+    </div>
+    <div class="note">Rows from the «Report Form» tab of DEAL CREATOR CHAT TRACKER, newest first.</div>
+  </div>
+</section>
+
+<!-- ============ REPORT ADS ============ -->
+<section id="tab-repads" style="display:none">
+  <div class="card">
+    <h2 style="margin-top:0;font-size:18px">📣 Report Ads</h2>
+    <div class="toolbar">
+      <input id="repadsSearch" placeholder="🔎 Filter rows…" style="max-width:220px">
+      <button class="btn ghost" onclick="loadGenericSheet('repads')">↻ Refresh</button>
+      <span class="muted" id="repadsHint" style="font-size:12.5px"></span>
+    </div>
+    <div class="tablewrap">
+      <table><thead><tr id="repadsThead"></tr></thead><tbody id="repadsTbody"></tbody></table>
+    </div>
+    <div class="note">Rows from the «Report Ads» tab of DEAL CREATOR CHAT TRACKER, newest first.</div>
   </div>
 </section>
 
@@ -226,55 +263,6 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
       <table><thead><tr id="shThead"></tr></thead><tbody id="shTbody"></tbody></table>
     </div>
     <div class="note">Reads the journals your n8n automations write: Telegram (All Chat tracker), Facebook Form, Hair, Meta AI Chat, inbound SMS (RC), Negative Comments, DrChrono, Dashboard Leads and more. Latest 500 rows, newest first.</div>
-  </div>
-</section>
-
-<!-- ============ ADD LEAD ============ -->
-<section id="tab-add" style="display:none">
-  <div class="card">
-    <h2 style="margin-top:0;font-size:18px">⚡ Quick Paste — same as Telegram</h2>
-    <label class="fld"><span>Paste lead text in any format: Facebook form answers, "name / phone / ZIP / time" lines, etc.</span>
-      <textarea id="pasteText" rows="7" placeholder="Kale Walker&#10;2149180251&#10;75126&#10;call now"></textarea></label>
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <label class="btn ghost" style="cursor:pointer">📷 Attach photo<input type="file" id="pastePhoto" accept="image/*" style="display:none" onchange="onPastePhoto(this)"></label>
-      <button class="btn ghost" onclick="captureScreenTo('paste')">🖥 Screenshot a window</button>
-      <span id="pastePhotoInfo" class="muted" style="font-size:12.5px"></span>
-      <img id="pastePhotoPreview" style="display:none;max-height:56px;border-radius:8px;border:1px solid var(--line)">
-      <button class="btn ghost" id="pastePhotoClear" style="display:none" onclick="clearPastePhoto()">✕ Remove photo</button>
-    </div>
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px">
-      <button class="btn" id="pasteSubmit" onclick="submitPaste()">Parse &amp; Create in Zoho</button>
-      <button class="btn ghost" onclick="pasteText.value='';pasteMsg.className='msg';clearPastePhoto()">Clear</button>
-      <span class="muted" style="font-size:12.5px">Text and/or a photo (chat screenshot, form, handwritten note) — AI extracts name, phone, ZIP, language and call time.</span>
-    </div>
-    <div class="msg" id="pasteMsg"></div>
-  </div>
-  <div class="card">
-    <h2 style="margin-top:0;font-size:18px">Add lead to Zoho</h2>
-    <form id="leadForm" onsubmit="submitLead(event)" novalidate>
-      <div class="grid">
-        <label class="fld"><span>First name <em>*</em></span><input name="first_name" required placeholder="Ivan"></label>
-        <label class="fld"><span>Last name</span><input name="last_name" placeholder="Petrov"></label>
-        <label class="fld"><span>Phone <em>*</em> <span class="muted">(10 digits US or +international)</span></span><input name="phone" required placeholder="(803) 664-1909" inputmode="tel"></label>
-        <label class="fld"><span>Email</span><input name="email" type="email" placeholder="ivan@example.com"></label>
-        <label class="fld"><span>City</span><input name="city" placeholder="Miami"></label>
-        <label class="fld"><span>ZIP</span><input name="zip" placeholder="33101" inputmode="numeric" maxlength="10"></label>
-        <label class="fld"><span>Best time to call</span><input name="contact_time" placeholder="now / tomorrow 3pm / 7/20 11:00am"></label>
-        <label class="fld"><span>Source</span>
-          <select name="source">
-            <option>Dashboard</option><option>Facebook Form</option><option>Instagram DM</option>
-            <option>Phone call</option><option>Referral</option><option>Walk-in</option><option>Other</option>
-          </select></label>
-        <label class="fld full"><span>Interest / procedure</span><input name="interest" placeholder="Rhinoplasty / consultation"></label>
-        <label class="fld full"><span>Notes</span><textarea name="notes" rows="3" placeholder="Any details…"></textarea></label>
-      </div>
-      <div style="display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap">
-        <button class="btn" type="submit" id="leadSubmit">Create in Zoho</button>
-        <button class="btn ghost" type="reset">Reset</button>
-        <span class="muted" style="font-size:12.5px">n8n normalizes the phone, checks duplicates, upserts Contact + Deal and logs to the journal.</span>
-      </div>
-      <div class="msg" id="leadMsg"></div>
-    </form>
   </div>
 </section>
 
@@ -348,13 +336,14 @@ function apiHeaders(extra){
 }
 
 // ---------- tabs ----------
-const ALL_TABS=['report','report2','fbform','sheets','lookup','add','settings'];
-let r2Loaded=false,fbLoaded=false;
+const ALL_TABS=['report','report2','fbform','negcom','repform','repads','sheets','lookup','settings'];
+let r2Loaded=false,fbLoaded=false;const genLoaded={};
 function showTab(t){
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('active',x.dataset.tab===t));
   ALL_TABS.forEach(x=>document.getElementById('tab-'+x).style.display=x===t?'':'none');
-  if(t==='report2'&&!r2Loaded&&cfg.report){r2Loaded=true;document.getElementById('rpFrom').value=todayNY();document.getElementById('rpTo').value=todayNY();loadReport2();loadReportSheet();}
+  if(t==='report2'&&!r2Loaded&&cfg.report){r2Loaded=true;loadReportSheet();}
   if(t==='fbform'&&!fbLoaded&&cfg.report){fbLoaded=true;loadFbForm();}
+  if(GENERIC_SHEETS[t]&&!genLoaded[t]&&cfg.report){genLoaded[t]=true;loadGenericSheet(t);}
 }
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
 function openSettings(){showTab('settings');}
@@ -422,7 +411,7 @@ async function loadReport(){
       const t=document.getElementById('dTo').value||f;
       u.searchParams.set('calls_from',f); u.searchParams.set('calls_to',t);
       const lbl=document.getElementById('navLeadsLabel');
-      lbl.textContent='Leads · '+(f===t?(f===todayNY()?'today · '+f:f):f+' → '+t);
+      lbl.textContent='Add + Leads · '+(f===t?(f===todayNY()?'today · '+f:f):f+' → '+t);
     }
     const r=await fetch(u,{headers:apiHeaders()});
     let data=null;
@@ -512,39 +501,6 @@ function exportCsv(){
   a.download='leads_'+todayStr()+'.csv'; a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),5000);
 }
-
-// ---------- add lead (structured form) ----------
-function validateLead(fd){
-  if(!fd.first_name.trim()) return 'First name is required.';
-  const raw=fd.phone.trim();
-  const digits=raw.replace(/\D/g,'');
-  if(!raw) return 'Phone is required.';
-  if(raw.startsWith('+')){ if(digits.length<8) return 'International number looks too short.'; }
-  else if(digits.length<10||(digits.length===11&&!digits.startsWith('1'))||digits.length>11) return 'US phone: 10 digits (or 11 starting with 1).';
-  if(fd.email&&!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(fd.email.trim())) return 'Email looks invalid.';
-  if(fd.zip&&!/^\d{5}(-\d{4})?$/.test(fd.zip.trim())) return 'ZIP: 5 digits (e.g. 33101).';
-  return '';
-}
-async function submitLead(e){
-  e.preventDefault();
-  const m=document.getElementById('leadMsg'); m.className='msg'; m.textContent='';
-  const fd=Object.fromEntries(new FormData(e.target).entries());
-  const verr=validateLead(fd);
-  if(verr){ m.className='msg err'; m.textContent=verr; return; }
-  fd.submitted_at=new Date().toISOString(); fd.source_app='dashboard';
-  if(!cfg.create){ m.className='msg err'; m.textContent='Lead creation webhook is not set — open Settings.'; return; }
-  const btn=document.getElementById('leadSubmit'); btn.disabled=true; btn.textContent='Sending…';
-  try{
-    const r=await fetch(cfg.create,{method:'POST',headers:apiHeaders({'Content-Type':'application/json'}),body:JSON.stringify(fd)});
-    let data=null; try{ data=await r.json(); }catch(_){}
-    if(!r.ok||!data||data.ok!==true) throw new Error((data&&data.error)||('HTTP '+r.status));
-    m.className='msg ok';
-    m.textContent='✓ Lead sent to Zoho.'+(data.duplicate?' Duplicate found — deal updated.':' New deal created.')+(data.id?' Deal ID: '+data.id:'');
-    e.target.reset(); loadReport();
-  }catch(err){ m.className='msg err'; m.textContent='Send error: '+err.message+' (check webhook URL, token and CORS).'; }
-  finally{ btn.disabled=false; btn.textContent='Create in Zoho'; }
-}
-
 // ---------- lookup (search Zoho by phone or name) ----------
 // ZIP -> штат -> таймзона (та же таблица, что в n8n workflow)
 const ZIP_RANGES=[[5,5,'NY'],[6,9,'PR'],[10,27,'MA'],[28,29,'RI'],[30,38,'NH'],[39,49,'ME'],[50,59,'VT'],[60,69,'CT'],[70,89,'NJ'],[100,149,'NY'],[150,196,'PA'],[197,199,'DE'],[200,200,'DC'],[201,201,'VA'],[202,205,'DC'],[206,219,'MD'],[220,246,'VA'],[247,268,'WV'],[270,289,'NC'],[290,299,'SC'],[300,319,'GA'],[320,349,'FL'],[350,369,'AL'],[370,385,'TN'],[386,397,'MS'],[398,399,'GA'],[400,427,'KY'],[430,459,'OH'],[460,479,'IN'],[480,499,'MI'],[500,528,'IA'],[530,549,'WI'],[550,567,'MN'],[570,577,'SD'],[580,588,'ND'],[590,599,'MT'],[600,629,'IL'],[630,658,'MO'],[660,679,'KS'],[680,693,'NE'],[700,715,'LA'],[716,729,'AR'],[730,749,'OK'],[750,799,'TX'],[800,816,'CO'],[820,831,'WY'],[832,838,'ID'],[840,847,'UT'],[850,865,'AZ'],[870,884,'NM'],[885,885,'TX'],[889,898,'NV'],[900,961,'CA'],[967,968,'HI'],[970,979,'OR'],[980,994,'WA'],[995,999,'AK']];
@@ -765,14 +721,14 @@ document.addEventListener('paste',async e=>{
       e.preventDefault();
       try{
         const data=await compressImage(file);
-        const onAdd=document.getElementById('tab-add').style.display!=='none';
-        if(onAdd){
-          setPastePhoto(data);
-          const m=document.getElementById('pasteMsg'); m.className='msg ok'; m.textContent='✓ Screenshot pasted — press “Parse & Create in Zoho”.';
-        }else{
-          showTab('lookup');
+        const onLookup=document.getElementById('tab-lookup').style.display!=='none';
+        if(onLookup){
           setCheckPhoto(data);
           const m=document.getElementById('checkMsg'); m.className='msg ok'; m.textContent='✓ Screenshot pasted — press “Find in Zoho”.';
+        }else{
+          showTab('report');
+          setPastePhoto(data);
+          const m=document.getElementById('pasteMsg'); m.className='msg ok'; m.textContent='✓ Screenshot pasted — press “Parse & Create in Zoho”.';
         }
       }catch(err){}
       break;
@@ -841,59 +797,10 @@ function drawTable(theadId,tbodyId,rowsArr){
   th.querySelectorAll('th').forEach(el=>el.onclick=()=>{const k=el.dataset.k;if(st.key===k)st.dir*=-1;else{st.key=k;st.dir=1;}drawTable(theadId,tbodyId,rowsArr);});
 }
 
-// ---------- Report tab (Zoho stage stats + Report sheet) ----------
-function nyShift(days){
-  const [y,m,d]=todayNY().split('-').map(Number);
-  const dt=new Date(Date.UTC(y,m-1,d));
-  dt.setUTCDate(dt.getUTCDate()+days);
-  return dt.toISOString().slice(0,10);
-}
-async function statsRange(from,to){
-  const data=await sheetsFetch({stats:'1',from,to});
-  return {
-    q:(data.quote_sent?.count??0)+(data.quote_sent?.capped?'+':''),
-    r:(data.retainer_sent?.count??0)+(data.retainer_sent?.capped?'+':''),
-  };
-}
-async function loadReport2(){
-  const hint=document.getElementById('rpHint');
-  if(!cfg.report){ hint.textContent='Set the report webhook URL in Settings first.'; return; }
-  const ids=['qsToday','risToday','qsYest','risYest','qsWeek','risWeek'];
-  ids.forEach(id=>document.getElementById(id).textContent='…');
-  hint.textContent='loading…';
-  try{
-    const data=await sheetsFetch({stats:'multi'});
-    const put=(idQ,idR,o)=>{
-      document.getElementById(idQ).textContent=(o?.quote_sent?.count??0)+(o?.quote_sent?.capped?'+':'');
-      document.getElementById(idR).textContent=(o?.retainer_sent?.count??0)+(o?.retainer_sent?.capped?'+':'');
-    };
-    put('qsToday','risToday',data.today);
-    put('qsYest','risYest',data.yesterday);
-    put('qsWeek','risWeek',data.week);
-    hint.textContent='window '+data.from+' → '+data.to+' (NY) · scanned '+(data.scanned||0)+' recently modified deals'+(data.truncated?' · older changes beyond scan depth marked with +':'');
-  }catch(e){
-    ids.forEach(id=>document.getElementById(id).textContent='✗');
-    hint.textContent='error: '+e.message;
-  }
-}
-async function loadReport2Custom(){
-  const hint=document.getElementById('rpCustomHint');
-  if(!cfg.report){ hint.textContent='Set the report webhook URL in Settings first.'; return; }
-  const f=document.getElementById('rpFrom').value||todayNY();
-  const t=document.getElementById('rpTo').value||f;
-  document.getElementById('qsCustom').textContent='…';
-  document.getElementById('risCustom').textContent='…';
-  hint.textContent='loading…';
-  try{
-    const v=await statsRange(f,t);
-    document.getElementById('qsCustom').textContent=v.q;
-    document.getElementById('risCustom').textContent=v.r;
-    hint.textContent=f===t?f:(f+' → '+t);
-  }catch(e){
-    document.getElementById('qsCustom').textContent='✗';
-    document.getElementById('risCustom').textContent='✗';
-    hint.textContent='error: '+e.message;
-  }
+// ---------- Report tab (Report sheet) ----------
+// Столбец Welcome SMS в таблицах листов не показываем
+function stripWelcome(rowsArr){
+  return (rowsArr||[]).map(r=>{const c=Object.assign({},r);delete c['Welcome SMS'];return c;});
 }
 async function loadReportSheet(){
   const hint=document.getElementById('rpShHint');
@@ -901,10 +808,37 @@ async function loadReportSheet(){
   hint.textContent='loading…';
   try{
     const data=await sheetsFetch({sheet:'Report',doc:'tracker'});
-    drawTable('rpThead','rpTbody',data.rows||[]);
+    drawTable('rpThead','rpTbody',stripWelcome(data.rows));
     hint.textContent='showing '+(data.count||0)+' of '+(data.total||0)+' rows'+(data.notice?' · '+data.notice:'');
   }catch(e){ hint.textContent='error: '+e.message+' (does the «Report» tab exist in the sheet?)'; }
 }
+
+// ---------- generic sheet tabs (Negative Comments / Report Form / Report Ads) ----------
+const GENERIC_SHEETS={
+  negcom:{doc:'tracker',sheet:'Negative Comments'},
+  repform:{doc:'tracker',sheet:'Report Form'},
+  repads:{doc:'tracker',sheet:'Report Ads'},
+};
+const genRows={};
+function genericFiltered(id){
+  const q=(document.getElementById(id+'Search').value||'').toLowerCase();
+  return (genRows[id]||[]).filter(r=>!q||JSON.stringify(r).toLowerCase().includes(q));
+}
+async function loadGenericSheet(id){
+  const gs=GENERIC_SHEETS[id];
+  const hint=document.getElementById(id+'Hint');
+  if(!cfg.report){ hint.textContent='Set the report webhook URL in Settings first.'; return; }
+  hint.textContent='loading…';
+  try{
+    const data=await sheetsFetch({sheet:gs.sheet,doc:gs.doc});
+    genRows[id]=stripWelcome(data.rows);
+    drawTable(id+'Thead',id+'Tbody',genericFiltered(id));
+    hint.textContent='showing '+(data.count||0)+' of '+(data.total||0)+' rows'+(data.notice?' · '+data.notice:'');
+  }catch(e){ hint.textContent='error: '+e.message+' (does the «'+gs.sheet+'» tab exist in the sheet?)'; }
+}
+Object.keys(GENERIC_SHEETS).forEach(id=>{
+  document.getElementById(id+'Search').addEventListener('input',()=>drawTable(id+'Thead',id+'Tbody',genericFiltered(id)));
+});
 
 // ---------- Facebook Form tab (last 7 days from the sheet) ----------
 let fbRows=[];
