@@ -977,7 +977,7 @@ async function submitPaste(){
   if(!cfg.create){ m.className='msg err'; m.textContent='Lead creation webhook is not set — open Settings.'; return; }
   const btn=document.getElementById('pasteSubmit'); btn.disabled=true; btn.textContent='AI is parsing…';
   try{
-    const body={raw_text:raw,source:pastePhotoData?'Dashboard Photo':'Dashboard Paste',submitted_at:new Date().toISOString(),source_app:'dashboard'};
+    const body={raw_text:raw,source:'Facebook',submitted_at:new Date().toISOString(),source_app:'dashboard'};
     if(pastePhotoData){ body.photo_base64=pastePhotoData.b64; body.photo_mime=pastePhotoData.mime; }
     const r=await fetch(cfg.create,{method:'POST',headers:apiHeaders({'Content-Type':'application/json'}),body:JSON.stringify(body)});
     let data=null; try{ data=await r.json(); }catch(_){}
