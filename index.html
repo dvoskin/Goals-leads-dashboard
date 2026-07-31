@@ -89,7 +89,10 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
 <!-- ============ ADD + LEADS (quick paste + calls for date) ============ -->
 <section id="tab-report">
   <div class="card">
-    <h2 style="margin-top:0;font-size:18px">⚡ Quick Paste — same as Telegram</h2>
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
+      <h2 style="margin:0;font-size:18px">⚡ Quick Paste — same as Telegram</h2>
+      <div id="tgLoginBox" style="display:flex;gap:8px;align-items:center;min-height:34px"></div>
+    </div>
     <label class="fld"><span>Paste lead text in any format: Facebook form answers, "name / phone / ZIP / time" lines, etc.</span>
       <textarea id="pasteText" rows="7" placeholder="Kale Walker&#10;2149180251&#10;75126&#10;call now"></textarea></label>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -317,7 +320,7 @@ function copySetupLink(){
   else prompt('Copy this link:',link);
 }
 function saveCfg(){
-  cfg={create:cfgCreate.value.trim(),report:cfgReport.value.trim(),token:cfgToken.value.trim(),limit:cfgLimit.value.trim(),manager:cfgManager.value.trim()};
+  cfg=Object.assign({},cfg,{create:cfgCreate.value.trim(),report:cfgReport.value.trim(),token:cfgToken.value.trim(),limit:cfgLimit.value.trim(),manager:cfgManager.value.trim()});
   localStorage.setItem(LS,JSON.stringify(cfg));
   document.getElementById('cfgSaved').textContent='✓ saved';
   setTimeout(()=>document.getElementById('cfgSaved').textContent='',1500);
@@ -336,6 +339,33 @@ function apiHeaders(extra){
   if(cfg.token) h['x-api-key']=cfg.token;
   return h;
 }
+
+// ---------- Login with Telegram (бот @Goals_dashboard_login_bot) ----------
+function renderTgLogin(){
+  const box=document.getElementById('tgLoginBox'); if(!box) return;
+  if(cfg.tg&&cfg.tg.id){
+    const nm=((cfg.tg.first_name||'')+' '+(cfg.tg.last_name||'')).trim()||cfg.tg.username||cfg.tg.id;
+    box.innerHTML=`<span class="tag" title="Every lead you add is logged with this Telegram identity">👤 ${esc(nm)} · ID ${esc(cfg.tg.id)}</span>
+      <button class="btn ghost" style="padding:5px 10px;font-size:12.5px" onclick="tgLogout()">Log out</button>`;
+  }else{
+    box.innerHTML='';
+    const s=document.createElement('script');
+    s.src='https://telegram.org/js/telegram-widget.js?22';
+    s.async=true;
+    s.setAttribute('data-telegram-login','Goals_dashboard_login_bot');
+    s.setAttribute('data-size','medium');
+    s.setAttribute('data-onauth','onTelegramAuth(user)');
+    s.setAttribute('data-request-access','write');
+    box.appendChild(s);
+  }
+}
+function onTelegramAuth(u){
+  cfg.tg={id:String(u.id),first_name:u.first_name||'',last_name:u.last_name||'',username:u.username||''};
+  if(!cfg.manager) cfg.manager=((u.first_name||'')+' '+(u.last_name||'')).trim();
+  localStorage.setItem(LS,JSON.stringify(cfg));
+  renderTgLogin();
+}
+function tgLogout(){ delete cfg.tg; localStorage.setItem(LS,JSON.stringify(cfg)); renderTgLogin(); }
 
 // ---------- tabs ----------
 const ALL_TABS=['report','report2','fbform','negcom','repform','repads','sheets','lookup','settings'];
@@ -1029,7 +1059,7 @@ async function submitPaste(){
   if(!cfg.create){ m.className='msg err'; m.textContent='Lead creation webhook is not set — open Settings.'; return; }
   const btn=document.getElementById('pasteSubmit'); btn.disabled=true; btn.textContent='AI is parsing…';
   try{
-    const body={raw_text:raw,source:'Facebook',submitted_at:new Date().toISOString(),source_app:'dashboard',manager:cfg.manager||''};
+    const body={raw_text:raw,source:'Facebook',submitted_at:new Date().toISOString(),source_app:'dashboard',manager:cfg.manager||'',tg:cfg.tg||null};
     if(pastePhotoData){ body.photo_base64=pastePhotoData.b64; body.photo_mime=pastePhotoData.mime; }
     const r=await fetch(cfg.create,{method:'POST',headers:apiHeaders({'Content-Type':'application/json'}),body:JSON.stringify(body)});
     let data=null; try{ data=await r.json(); }catch(_){}
@@ -1046,7 +1076,7 @@ async function submitPaste(){
 // ---------- init ----------
 document.getElementById('dFrom').value=todayNY();
 document.getElementById('dTo').value=todayNY();
-fillCfg(); updateMode(); loadReport();
+fillCfg(); updateMode(); loadReport(); renderTgLogin();
 // Вкладка Settings скрыта из навигации: открывается по адресу …/#settings
 // или сама — на устройстве, где вебхуки ещё не настроены
 if(location.hash.replace('#','')==='settings'||(!cfg.report&&!cfg.create)) showTab('settings');

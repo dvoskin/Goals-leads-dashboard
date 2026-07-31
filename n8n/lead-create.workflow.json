@@ -838,6 +838,67 @@
       }
     },
     {
+      "name": "Prepare Chat Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        -260
+      ],
+      "parameters": {
+        "jsCode": "// Строка для листа \"All Chat tracker\" — тот же формат, что в DEAL CREATOR,\n// но вместо Telegram-триггера — данные Login with Telegram с дашборда\nconst prev = $('Deal Decision').first().json;\nconst body = $('Webhook').first().json.body || {};\nconst tg = body.tg || {};\nconst now = new Date();\nconst etStr = now.toLocaleString('en-US', {\n  timeZone: 'America/New_York',\n  month: '2-digit', day: '2-digit', year: 'numeric',\n  hour: '2-digit', minute: '2-digit', second: '2-digit',\n  hour12: true, timeZoneName: 'short',\n});\nconst tgName = ((tg.first_name || '') + ' ' + (tg.last_name || '')).trim();\nconst username = String(tgName || body.manager || 'Dashboard').slice(0, 80);\nreturn [{\n  json: {\n    'Count of Deals Created': 1,\n    'Username': username,\n    'User ID': String(tg.id || ''),\n    'Date': etStr,\n    'Client Name': ((prev.firstName || '') + ' ' + (prev.lastName || '')).trim(),\n    'Client Phone': prev.phone || '',\n    'Duplicates': prev.isDuplicate ? 1 : '',\n  },\n}];\n"
+      }
+    },
+    {
+      "name": "Sheets: Append Chat",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3080,
+        -260
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "10Yr6hkRJK2C6PCvQ1P_t5s1VUls-LZi-1xi8N4j91Z8",
+          "mode": "list",
+          "cachedResultName": "DEAL CREATOR CHAT TRACKER",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/10Yr6hkRJK2C6PCvQ1P_t5s1VUls-LZi-1xi8N4j91Z8/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1538731639,
+          "mode": "list",
+          "cachedResultName": "All Chat tracker",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/10Yr6hkRJK2C6PCvQ1P_t5s1VUls-LZi-1xi8N4j91Z8/edit#gid=1538731639"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Count of Deals Created": "={{ $json['Count of Deals Created'] }}",
+            "Username": "={{ $json.Username }}",
+            "User ID": "={{ $json['User ID'] }}",
+            "Date": "={{ $json.Date }}",
+            "Client Name": "={{ $json['Client Name'] }}",
+            "Client Phone": "={{ $json['Client Phone'] }}",
+            "Duplicates": "={{ $json.Duplicates }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "HWi3hgVZ1OjoFkBZ",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
       "name": "Respond 200",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
@@ -847,7 +908,7 @@
       ],
       "parameters": {
         "respondWith": "text",
-        "responseBody": "={{ JSON.stringify({ ok: true, id: $('Prepare Log Row').first().json['Deal ID'] || null, contact_id: $('Prepare Log Row').first().json['Contact ID'] || null, duplicate: $('Deal Decision').first().json.isDuplicate === true, stage: $('Deal Decision').first().json.dealData.Stage, name: $('Validate & Normalize').first().json.fullName || '', phone: $('Validate & Normalize').first().json.phone || '', best_contact_time: $('Validate & Normalize').first().json.bestContactTime || '', journal_error: ($json.error ? String($json.error.message || $json.error.description || JSON.stringify($json.error)).slice(0, 200) : null) }) }}",
+        "responseBody": "={{ JSON.stringify({ ok: true, id: $('Prepare Log Row').first().json['Deal ID'] || null, contact_id: $('Prepare Log Row').first().json['Contact ID'] || null, duplicate: $('Deal Decision').first().json.isDuplicate === true, stage: $('Deal Decision').first().json.dealData.Stage, name: $('Validate & Normalize').first().json.fullName || '', phone: $('Validate & Normalize').first().json.phone || '', best_contact_time: $('Validate & Normalize').first().json.bestContactTime || '', journal_error: (($('Sheets: Append Journal').first().json.error || $json.error) ? String((($('Sheets: Append Journal').first().json.error || $json.error).message) || JSON.stringify($('Sheets: Append Journal').first().json.error || $json.error)).slice(0, 200) : null) }) }}",
         "options": {
           "responseCode": 200,
           "responseHeaders": {
@@ -1225,6 +1286,28 @@
       ]
     },
     "Sheets: Append Journal": {
+      "main": [
+        [
+          {
+            "node": "Prepare Chat Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Chat Row": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Append Chat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Append Chat": {
       "main": [
         [
           {
