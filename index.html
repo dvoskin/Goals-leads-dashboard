@@ -298,7 +298,16 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
 <script>
 // ---------- config (persisted in localStorage) ----------
 const LS='leadsDashCfg';
-let cfg=JSON.parse(localStorage.getItem(LS)||'{}');
+// Подключение вшито в страницу — любой новый браузер работает сразу,
+// без настройки. Сохранённые в браузере значения имеют приоритет.
+const CFG_DEFAULTS={
+  create:'https://dvoskin.app.n8n.cloud/webhook/lead-create',
+  report:'https://dvoskin.app.n8n.cloud/webhook/leads-list',
+  token:'0a4f689f0c15a50a9b0742a1a1e918080360ef15524f22f7',
+};
+const _stored=JSON.parse(localStorage.getItem(LS)||'{}');
+Object.keys(_stored).forEach(k=>{if(_stored[k]===''||_stored[k]==null)delete _stored[k];});
+let cfg=Object.assign({},CFG_DEFAULTS,_stored);
 // Настроечная ссылка: #cfg=<base64url JSON> — применяем и убираем из адреса
 (function(){
   const m=location.hash.match(/#cfg=([A-Za-z0-9\-_]+)/);
