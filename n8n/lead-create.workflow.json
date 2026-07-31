@@ -709,7 +709,7 @@
         -120
       ],
       "parameters": {
-        "jsCode": "// Дедупликация сделки (окно 2 дня, Stage \"Duplicates / Junk\" пропускаем) — логика DEAL CREATOR\nconst prev = $('Extract Contact ID').first().json;\nconst searchResult = $input.first().json || {};\nconst deals = searchResult.data || [];\nconst now = new Date();\nconst twoDaysMs = 2 * 24 * 60 * 60 * 1000;\n\nlet existingDealId = null;\nlet dealAction = 'create';\nlet existingDealOwner = null;\nfor (const deal of deals) {\n  if (deal.Stage === 'Duplicates / Junk') continue;\n  const diffMs = now.getTime() - new Date(deal.Created_Time).getTime();\n  if (diffMs < twoDaysMs) {\n    existingDealId = deal.id;\n    dealAction = 'update';\n    existingDealOwner = deal.Owner ? (deal.Owner.name || null) : null;\n    break;\n  }\n}\nconst isDuplicate = dealAction === 'update';\nconst stage = prev.stage || 'New Deal';\n\nconst dealData = {};\nif (dealAction === 'update' && existingDealId) dealData.id = existingDealId;\nif (dealAction === 'create') dealData.Deal_Name = prev.fullName || 'Unknown';\ndealData.Stage = stage;\nif (prev.source) dealData.Lead_Source = prev.source;\nif (prev.bestContactTime) dealData.Best_Contact_Time = prev.bestContactTime;\nif (prev.resolvedTimezone) { dealData.Client_Timezone = prev.resolvedTimezone; dealData.Timezone = prev.resolvedTimezone; }\nif (prev.contactTime) dealData.Contact_Time_Raw = prev.contactTime;\nif (prev.phone) dealData.Phone = prev.phone;\nif (prev.zohoContactId) dealData.Contact_Name = { id: prev.zohoContactId };\nif (prev.callScheduledISO) dealData.Call_Scheduled_Date_Time = prev.callScheduledISO;\nif (prev.resolvedZip) dealData.Zip_Code = prev.resolvedZip;\nif (prev.language) dealData.Language = prev.language;\n// Маркер \"Added via Dashboard\" позволяет отчёту отличать лиды, созданные через дашборд\nconst descParts = [\n  prev.interest ? 'Interest: ' + prev.interest : '',\n  prev.notes ? 'Notes: ' + prev.notes : '',\n  'Added via Dashboard',\n];\ndealData.Description = descParts.filter(Boolean).join('\\n');\ndealData.Pipeline = 'Standard';\n// Deal Owner всегда Ariel — как в DEAL CREATOR\ndealData.Owner = { id: '5212466000034327806' };\n\nreturn [{\n  json: {\n    ...prev,\n    existingDealId, dealAction, isDuplicate, existingDealOwner, dealData,\n    zohoBody: JSON.stringify({ data: [dealData] }),\n  },\n}];\n"
+        "jsCode": "// Дедупликация сделки (окно 2 дня, Stage \"Duplicates / Junk\" пропускаем) — логика DEAL CREATOR\nconst prev = $('Extract Contact ID').first().json;\nconst searchResult = $input.first().json || {};\nconst deals = searchResult.data || [];\nconst now = new Date();\nconst twoDaysMs = 2 * 24 * 60 * 60 * 1000;\n\nlet existingDealId = null;\nlet dealAction = 'create';\nlet existingDealOwner = null;\nfor (const deal of deals) {\n  if (deal.Stage === 'Duplicates / Junk') continue;\n  const diffMs = now.getTime() - new Date(deal.Created_Time).getTime();\n  if (diffMs < twoDaysMs) {\n    existingDealId = deal.id;\n    dealAction = 'update';\n    existingDealOwner = deal.Owner ? (deal.Owner.name || null) : null;\n    break;\n  }\n}\nconst isDuplicate = dealAction === 'update';\nconst stage = prev.stage || 'New Deal';\n\nconst dealData = {};\nif (dealAction === 'update' && existingDealId) dealData.id = existingDealId;\nif (dealAction === 'create') dealData.Deal_Name = prev.fullName || 'Unknown';\ndealData.Stage = stage;\nif (prev.source) dealData.Lead_Source = prev.source;\nif (prev.bestContactTime) dealData.Best_Contact_Time = prev.bestContactTime;\nif (prev.resolvedTimezone) { dealData.Client_Timezone = prev.resolvedTimezone; dealData.Timezone = prev.resolvedTimezone; }\nif (prev.contactTime) dealData.Contact_Time_Raw = prev.contactTime;\nif (prev.phone) dealData.Phone = prev.phone;\nif (prev.zohoContactId) dealData.Contact_Name = { id: prev.zohoContactId };\nif (prev.callScheduledISO) dealData.Call_Scheduled_Date_Time = prev.callScheduledISO;\nif (prev.resolvedZip) dealData.Zip_Code = prev.resolvedZip;\nif (prev.language) dealData.Language = prev.language;\n// Маркер \"Added via Dashboard\" позволяет отчёту отличать лиды, созданные через дашборд;\n// manager — идентификатор сотрудника (имя / Telegram ID) из настроек его устройства\nconst manager = String(($('Webhook').first().json.body || {}).manager || '').trim().slice(0, 80);\nconst descParts = [\n  prev.interest ? 'Interest: ' + prev.interest : '',\n  prev.notes ? 'Notes: ' + prev.notes : '',\n  'Added via Dashboard' + (manager ? ' by ' + manager : ''),\n];\ndealData.Description = descParts.filter(Boolean).join('\\n');\ndealData.Pipeline = 'Standard';\n// Deal Owner всегда Ariel — как в DEAL CREATOR\ndealData.Owner = { id: '5212466000034327806' };\n\nreturn [{\n  json: {\n    ...prev,\n    existingDealId, dealAction, isDuplicate, existingDealOwner, dealData,\n    zohoBody: JSON.stringify({ data: [dealData] }),\n  },\n}];\n"
       }
     },
     {
@@ -748,7 +748,7 @@
         -120
       ],
       "parameters": {
-        "jsCode": "// Строка журнала для Google Sheet (лист \"Dashboard Leads\")\nconst prev = $('Deal Decision').first().json;\nconst dealResp = $input.first().json || {};\nconst dealId = (dealResp.data && dealResp.data[0] && dealResp.data[0].details && dealResp.data[0].details.id) || prev.existingDealId || '';\n\nreturn [{\n  json: {\n    'Added': DateTime.now().setZone('America/New_York').toFormat('yyyy-MM-dd HH:mm'),\n    'First Name': prev.firstName || '',\n    'Last Name': prev.lastName || '',\n    'Phone': prev.phone || '',\n    'Email': prev.email || '',\n    'City': prev.resolvedCity || '',\n    'ZIP': prev.resolvedZip || '',\n    'Contact Time': prev.contactTime || '',\n    'Best Contact Time': prev.bestContactTime || '',\n    'Source': prev.source || 'Dashboard',\n    'Interest': prev.interest || '',\n    'Notes': prev.notes || '',\n    'Status': prev.isDuplicate ? 'Duplicate (updated)' : 'New',\n    'Deal Stage': (prev.dealData && prev.dealData.Stage) || '',\n    'Deal ID': String(dealId),\n    'Contact ID': String(prev.zohoContactId || ''),\n  },\n}];\n"
+        "jsCode": "// Строка журнала для Google Sheet (лист \"Dashboard Leads\")\nconst prev = $('Deal Decision').first().json;\nconst dealResp = $('Zoho: Upsert Deal').first().json || {};\nconst dealId = (dealResp.data && dealResp.data[0] && dealResp.data[0].details && dealResp.data[0].details.id) || prev.existingDealId || '';\nconst manager = String(($('Webhook').first().json.body || {}).manager || '').trim().slice(0, 80);\n\nreturn [{\n  json: {\n    'Added': DateTime.now().setZone('America/New_York').toFormat('yyyy-MM-dd HH:mm'),\n    'First Name': prev.firstName || '',\n    'Last Name': prev.lastName || '',\n    'Phone': prev.phone || '',\n    'Email': prev.email || '',\n    'City': prev.resolvedCity || '',\n    'ZIP': prev.resolvedZip || '',\n    'Contact Time': prev.contactTime || '',\n    'Best Contact Time': prev.bestContactTime || '',\n    'Source': prev.source || 'Dashboard',\n    'Interest': prev.interest || '',\n    'Notes': prev.notes || '',\n    'Status': prev.isDuplicate ? 'Duplicate (updated)' : 'New',\n    'Deal Stage': (prev.dealData && prev.dealData.Stage) || '',\n    'Deal ID': String(dealId),\n    'Contact ID': String(prev.zohoContactId || ''),\n    'Manager': manager,\n  },\n}];\n"
       }
     },
     {
@@ -807,22 +807,23 @@
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
-            "Added": "={{ $('Prepare Log Row').first().json['Added'] }}",
-            "First Name": "={{ $('Prepare Log Row').first().json['First Name'] }}",
-            "Last Name": "={{ $('Prepare Log Row').first().json['Last Name'] }}",
-            "Phone": "={{ $('Prepare Log Row').first().json['Phone'] }}",
-            "Email": "={{ $('Prepare Log Row').first().json['Email'] }}",
-            "City": "={{ $('Prepare Log Row').first().json['City'] }}",
-            "ZIP": "={{ $('Prepare Log Row').first().json['ZIP'] }}",
-            "Contact Time": "={{ $('Prepare Log Row').first().json['Contact Time'] }}",
-            "Best Contact Time": "={{ $('Prepare Log Row').first().json['Best Contact Time'] }}",
-            "Source": "={{ $('Prepare Log Row').first().json['Source'] }}",
-            "Interest": "={{ $('Prepare Log Row').first().json['Interest'] }}",
-            "Notes": "={{ $('Prepare Log Row').first().json['Notes'] }}",
-            "Status": "={{ $('Prepare Log Row').first().json['Status'] }}",
-            "Deal Stage": "={{ $('Prepare Log Row').first().json['Deal Stage'] }}",
-            "Deal ID": "={{ $('Prepare Log Row').first().json['Deal ID'] }}",
-            "Contact ID": "={{ $('Prepare Log Row').first().json['Contact ID'] }}"
+            "Added": "={{ $json['Added'] }}",
+            "First Name": "={{ $json['First Name'] }}",
+            "Last Name": "={{ $json['Last Name'] }}",
+            "Phone": "={{ $json['Phone'] }}",
+            "Email": "={{ $json['Email'] }}",
+            "City": "={{ $json['City'] }}",
+            "ZIP": "={{ $json['ZIP'] }}",
+            "Contact Time": "={{ $json['Contact Time'] }}",
+            "Best Contact Time": "={{ $json['Best Contact Time'] }}",
+            "Source": "={{ $json['Source'] }}",
+            "Interest": "={{ $json['Interest'] }}",
+            "Notes": "={{ $json['Notes'] }}",
+            "Status": "={{ $json['Status'] }}",
+            "Deal Stage": "={{ $json['Deal Stage'] }}",
+            "Deal ID": "={{ $json['Deal ID'] }}",
+            "Contact ID": "={{ $json['Contact ID'] }}",
+            "Manager": "={{ $json['Manager'] }}"
           },
           "matchingColumns": [],
           "schema": []
@@ -1194,17 +1195,6 @@
       "main": [
         [
           {
-            "node": "Prepare Log Row",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Prepare Log Row": {
-      "main": [
-        [
-          {
             "node": "Sheets: Ensure Tab",
             "type": "main",
             "index": 0
@@ -1213,6 +1203,17 @@
       ]
     },
     "Sheets: Ensure Tab": {
+      "main": [
+        [
+          {
+            "node": "Prepare Log Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Log Row": {
       "main": [
         [
           {

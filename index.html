@@ -277,6 +277,8 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
       <input id="cfgToken" type="password" placeholder="DASHBOARD_API_KEY value from n8n" autocomplete="off"></label>
     <label class="fld" style="max-width:220px"><span>Report row limit (1–200)</span>
       <input id="cfgLimit" type="number" min="1" max="200" placeholder="200"></label>
+    <label class="fld" style="max-width:320px"><span>Manager ID <span class="muted">(your name or Telegram ID — attached to every lead you add)</span></span>
+      <input id="cfgManager" placeholder="e.g. Danny or 123456789"></label>
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <button class="btn" onclick="saveCfg()">Save</button>
       <button class="btn ghost" onclick="copySetupLink()">📱 Copy setup link for phone</button>
@@ -306,6 +308,7 @@ let cfg=JSON.parse(localStorage.getItem(LS)||'{}');
   }catch(e){}
 })();
 function copySetupLink(){
+  // Manager ID в ссылку не включаем — каждый сотрудник вводит свой на своём устройстве
   const payload=btoa(unescape(encodeURIComponent(JSON.stringify({create:cfg.create||'',report:cfg.report||'',token:cfg.token||'',limit:cfg.limit||''}))))
     .replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
   const link=location.origin+location.pathname+'#cfg='+payload;
@@ -314,13 +317,13 @@ function copySetupLink(){
   else prompt('Copy this link:',link);
 }
 function saveCfg(){
-  cfg={create:cfgCreate.value.trim(),report:cfgReport.value.trim(),token:cfgToken.value.trim(),limit:cfgLimit.value.trim()};
+  cfg={create:cfgCreate.value.trim(),report:cfgReport.value.trim(),token:cfgToken.value.trim(),limit:cfgLimit.value.trim(),manager:cfgManager.value.trim()};
   localStorage.setItem(LS,JSON.stringify(cfg));
   document.getElementById('cfgSaved').textContent='✓ saved';
   setTimeout(()=>document.getElementById('cfgSaved').textContent='',1500);
   updateMode(); loadReport();
 }
-function fillCfg(){cfgCreate.value=cfg.create||'';cfgReport.value=cfg.report||'';cfgToken.value=cfg.token||'';cfgLimit.value=cfg.limit||'';}
+function fillCfg(){cfgCreate.value=cfg.create||'';cfgReport.value=cfg.report||'';cfgToken.value=cfg.token||'';cfgLimit.value=cfg.limit||'';cfgManager.value=cfg.manager||'';}
 function updateMode(){
   const live=cfg.report||cfg.create;
   const p=document.getElementById('modePill');
@@ -1026,7 +1029,7 @@ async function submitPaste(){
   if(!cfg.create){ m.className='msg err'; m.textContent='Lead creation webhook is not set — open Settings.'; return; }
   const btn=document.getElementById('pasteSubmit'); btn.disabled=true; btn.textContent='AI is parsing…';
   try{
-    const body={raw_text:raw,source:'Facebook',submitted_at:new Date().toISOString(),source_app:'dashboard'};
+    const body={raw_text:raw,source:'Facebook',submitted_at:new Date().toISOString(),source_app:'dashboard',manager:cfg.manager||''};
     if(pastePhotoData){ body.photo_base64=pastePhotoData.b64; body.photo_mime=pastePhotoData.mime; }
     const r=await fetch(cfg.create,{method:'POST',headers:apiHeaders({'Content-Type':'application/json'}),body:JSON.stringify(body)});
     let data=null; try{ data=await r.json(); }catch(_){}
