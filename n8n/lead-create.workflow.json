@@ -753,25 +753,25 @@
     },
     {
       "name": "Sheets: Ensure Tab",
-      "type": "n8n-nodes-base.googleSheets",
-      "typeVersion": 4.5,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [
         2530,
         -220
       ],
+      "alwaysOutputData": true,
       "onError": "continueRegularOutput",
       "parameters": {
-        "resource": "sheet",
-        "operation": "create",
-        "documentId": {
-          "__rl": true,
-          "value": "10Yr6hkRJK2C6PCvQ1P_t5s1VUls-LZi-1xi8N4j91Z8",
-          "mode": "list",
-          "cachedResultName": "DEAL CREATOR CHAT TRACKER",
-          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/10Yr6hkRJK2C6PCvQ1P_t5s1VUls-LZi-1xi8N4j91Z8/edit?usp=drivesdk"
-        },
-        "title": "Dashboard Leads",
-        "options": {}
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/10Yr6hkRJK2C6PCvQ1P_t5s1VUls-LZi-1xi8N4j91Z8:batchUpdate",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"requests\":[{\"addSheet\":{\"properties\":{\"title\":\"Dashboard Leads\"}}}]}",
+        "options": {
+          "timeout": 20000
+        }
       },
       "credentials": {
         "googleSheetsOAuth2Api": {
@@ -788,6 +788,7 @@
         2640,
         -120
       ],
+      "alwaysOutputData": true,
       "onError": "continueRegularOutput",
       "parameters": {
         "operation": "append",
