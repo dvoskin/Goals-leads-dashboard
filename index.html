@@ -108,16 +108,13 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
   </div>
   <div class="stats">
     <div class="stat"><b id="stTotal">0</b>leads</div>
-    <div class="stat"><b id="stNow">0</b>CALL NOW</div>
-    <div class="stat"><b id="stSoon">0</b>call within 1h</div>
-    <div class="stat"><b id="stShown">0</b>shown</div>
     <div class="stat"><b id="stUpd">—</b>updated</div>
   </div>
   <div class="card">
     <div class="toolbar">
       <div class="seg" id="viewSeg">
         <button data-view="all" class="active">All recent</button>
-        <button data-view="dash">Via Dashboard</button>
+        <button data-view="calls">Calls for date</button>
       </div>
       <input type="date" id="dFrom" style="max-width:160px" title="From (NY date)">
       <input type="date" id="dTo" style="max-width:160px" title="To (NY date)">
@@ -125,15 +122,20 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
       <input id="search" placeholder="🔎 Search…" style="max-width:180px">
       <select id="fltSource" title="Source"><option value="">Source: all</option></select>
       <select id="fltStage" title="Stage"><option value="">Stage: all</option></select>
+      <select id="fltChannel" title="Channel"><option value="">Channel: all</option><option value="dash">Dashboard</option><option value="other">Not Dashboard</option></select>
       <button class="btn ghost" onclick="loadReport()">↻ Refresh</button>
       <button class="btn ghost" onclick="exportCsv()">⬇ CSV</button>
       <span class="muted" id="reportHint" style="font-size:12.5px"></span>
+    </div>
+    <div class="toolbar" style="margin-top:-4px">
+      <input id="fltMins" type="number" min="1" max="720" placeholder="⏱ minutes" inputmode="numeric" style="max-width:130px">
+      <span class="muted" style="font-size:12.5px;flex:1 1 260px">⏱ Call-in-N-minutes filter: type a number of minutes (e.g. <b>10</b>, <b>35</b>, <b>60</b>) to show only leads whose call time is due within that many minutes from now (ET / New York). CALL NOW leads are always included. Clear the box to show all.</span>
     </div>
     <div class="tablewrap">
       <table id="tbl"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table>
     </div>
     <div class="note" id="reportNote">Showing demo data. Set the report webhook URL in Settings to pull real leads from n8n / Zoho.</div>
-    <p class="muted" style="font-size:12.5px;margin:8px 0 0">Calls view: leads whose Best Contact Time falls on the selected day(s) (New York) plus CALL NOW leads created that day. <span style="background:#123f28;padding:1px 8px;border-radius:6px">Green rows</span> = call within the next hour (or CALL NOW).</p>
+    <p class="muted" style="font-size:12.5px;margin:8px 0 0"><b>All recent</b> — every lead created in the selected day(s) (New York dates). <b>Calls for date</b> — leads whose scheduled call falls on the selected day(s) plus CALL NOW leads created that day. <span style="background:#123f28;padding:1px 8px;border-radius:6px">Green rows</span> = call within the next hour (or CALL NOW).</p>
   </div>
 </section>
 
@@ -403,16 +405,12 @@ async function loadReport(){
   hint.textContent='loading…';
   try{
     const u=new URL(cfg.report);
-    const lim=parseInt(cfg.limit,10);
-    if(Number.isFinite(lim)&&lim>0) u.searchParams.set('limit',Math.min(lim,200));
-    if(viewMode==='dash') u.searchParams.set('via','dashboard');
-    if(viewMode==='calls'){
-      const f=document.getElementById('dFrom').value||todayNY();
-      const t=document.getElementById('dTo').value||f;
-      u.searchParams.set('calls_from',f); u.searchParams.set('calls_to',t);
-      const lbl=document.getElementById('navLeadsLabel');
-      lbl.textContent='Add + Leads · '+(f===t?(f===todayNY()?'today · '+f:f):f+' → '+t);
-    }
+    const f=document.getElementById('dFrom').value||todayNY();
+    const t=document.getElementById('dTo').value||f;
+    u.searchParams.set('calls_from',f); u.searchParams.set('calls_to',t);
+    if(viewMode==='all') u.searchParams.set('calls_filter','created');
+    const lbl=document.getElementById('navLeadsLabel');
+    lbl.textContent='Add + Leads · '+(f===t?(f===todayNY()?'today · '+f:f):f+' → '+t);
     const r=await fetch(u,{headers:apiHeaders()});
     let data=null;
     try{ data=await r.json(); }catch(_){ data=null; }
@@ -425,6 +423,7 @@ async function loadReport(){
     }
     rows=data;
     document.getElementById('reportNote').style.display='none';
+    if(/COQL unavailable/i.test(notice)) notice='';
     hint.textContent=notice?('⚠ '+notice):'';
     document.getElementById('stUpd').textContent=new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
   }catch(e){
@@ -449,12 +448,22 @@ function filteredRows(){
   const q=(document.getElementById('search').value||'').toLowerCase();
   const fs=document.getElementById('fltSource').value;
   const fg=document.getElementById('fltStage').value;
-  const today=todayStr();
+  const fc=document.getElementById('fltChannel').value;
+  const mins=parseInt(document.getElementById('fltMins').value,10);
+  const useMins=Number.isFinite(mins)&&mins>0;
+  const now=Date.now();
   return rows.filter(r=>{
-    if(viewMode==='dash'&&!r.via_dashboard) return false;
     if(q&&!JSON.stringify(r).toLowerCase().includes(q)) return false;
     if(fs&&String(r.source??'')!==fs) return false;
     if(fg&&String(r.deal_stage??'')!==fg) return false;
+    if(fc==='dash'&&!r.via_dashboard) return false;
+    if(fc==='other'&&r.via_dashboard) return false;
+    if(useMins){
+      if(r.call_now===true) return true;
+      const t=Date.parse(r.call_at_iso||'');
+      if(isNaN(t)) return false;
+      if(t<now||t>now+mins*60e3) return false;
+    }
     return true;
   });
 }
@@ -472,27 +481,22 @@ function renderTable(){
   }).join('')+'</tr>').join('')
     || `<tr><td colspan="${c.length||1}" class="muted" style="padding:20px">No data</td></tr>`;
   document.getElementById('stTotal').textContent=rows.length;
-  document.getElementById('stShown').textContent=data.length;
-  document.getElementById('stNow').textContent=rows.filter(r=>r.call_now===true).length;
-  document.getElementById('stSoon').textContent=rows.filter(isSoon).length;
 }
 function setSort(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k;sortDir=1;} renderTable(); }
 document.getElementById('search').addEventListener('input',renderTable);
-['fltSource','fltStage'].forEach(id=>document.getElementById(id).addEventListener('change',renderTable));
+document.getElementById('fltMins').addEventListener('input',renderTable);
+['fltSource','fltStage','fltChannel'].forEach(id=>document.getElementById(id).addEventListener('change',renderTable));
 document.querySelectorAll('#viewSeg button').forEach(b=>b.onclick=()=>{
-  const wasActive=b.classList.contains('active');
   document.querySelectorAll('#viewSeg button').forEach(x=>x.classList.remove('active'));
-  // Повторный клик по активному виду возвращает к основному списку звонков
-  if(wasActive){ viewMode='calls'; }
-  else { b.classList.add('active'); viewMode=b.dataset.view; }
+  b.classList.add('active'); viewMode=b.dataset.view;
   if(cfg.report) loadReport(); else renderTable();
 });
 function setCallsToday(){
   document.getElementById('dFrom').value=todayNY();
   document.getElementById('dTo').value=todayNY();
-  if(viewMode==='calls') loadReport();
+  if(cfg.report) loadReport();
 }
-['dFrom','dTo'].forEach(id=>document.getElementById(id).addEventListener('change',()=>{if(viewMode==='calls')loadReport();}));
+['dFrom','dTo'].forEach(id=>document.getElementById(id).addEventListener('change',()=>{if(cfg.report)loadReport();}));
 function exportCsv(){
   const c=cols(); const data=filteredRows();
   const q=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
