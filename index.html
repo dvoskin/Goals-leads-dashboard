@@ -33,6 +33,7 @@ input::placeholder,textarea::placeholder{color:#5f708f}
 table{border-collapse:collapse;width:100%;font-size:13.5px}
 th,td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis}
 th{color:var(--mut);cursor:pointer;user-select:none;position:sticky;top:0;background:var(--card);z-index:1}
+thead tr.pin2 th{top:35px;background:#12233c;color:var(--ink);font-weight:600;cursor:default}
 th:hover{color:var(--ink)}
 tbody tr:hover{background:#0e1830}
 tbody tr.soon td{background:#123f28}
@@ -71,7 +72,6 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
   </div>
   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
     <span class="pill" id="modePill">demo mode</span>
-    <button class="btn ghost" onclick="openSettings()" style="padding:7px 13px">⚙️ Settings</button>
   </div>
 </header>
 
@@ -108,6 +108,7 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
   </div>
   <div class="stats">
     <div class="stat"><b id="stTotal">0</b>leads</div>
+    <div class="stat"><b id="stShown">0</b>shown</div>
     <div class="stat"><b id="stUpd">—</b>updated</div>
   </div>
   <div class="card">
@@ -144,7 +145,7 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
       <span class="muted" id="rpShHint" style="font-size:12.5px"></span>
     </div>
     <div class="tablewrap">
-      <table><thead><tr id="rpThead"></tr></thead><tbody id="rpTbody"></tbody></table>
+      <table><thead id="rpThead"></thead><tbody id="rpTbody"></tbody></table>
     </div>
   </div>
 </section>
@@ -344,7 +345,6 @@ function showTab(t){
   if(GENERIC_SHEETS[t]&&!genLoaded[t]&&cfg.report){genLoaded[t]=true;loadGenericSheet(t);}
 }
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
-function openSettings(){showTab('settings');}
 function todayNY(){return new Date().toLocaleDateString('en-CA',{timeZone:'America/New_York'});}
 
 // ---------- demo data ----------
@@ -358,9 +358,9 @@ let sortKey=null,sortDir=1;
 
 // ---------- helpers ----------
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const COL_ORDER=['call_at','added','first_name','last_name','phone','email','city','zip','contact_time','source','status','deal_stage','welcome','via','deal_id'];
-const COL_LABEL={call_at:'Call At',added:'Added',first_name:'First Name',last_name:'Last Name',phone:'Phone',email:'Email',city:'City',zip:'ZIP',contact_time:'Call Time',source:'Source',status:'Status',deal_stage:'Stage',welcome:'Welcome SMS',via:'Channel',deal_id:'Deal ID'};
-const HIDDEN_COLS=['via_dashboard','welcome_sms','call_at_iso','call_now'];
+const COL_ORDER=['call_at','added','first_name','last_name','phone','email','city','zip','contact_time','welcome','source','deal_stage','via','deal_id'];
+const COL_LABEL={call_at:'Call At',added:'Added',first_name:'First Name',last_name:'Last Name',phone:'Phone',email:'Email',city:'City',zip:'ZIP',contact_time:'Call Time',source:'Source',deal_stage:'Stage',welcome:'Welcome SMS',via:'Channel',deal_id:'Deal ID'};
+const HIDDEN_COLS=['via_dashboard','welcome_sms','call_at_iso','call_now','status'];
 function cols(){
   const s=new Set(); rows.forEach(r=>Object.keys(r).forEach(k=>s.add(k)));
   HIDDEN_COLS.forEach(k=>s.delete(k));
@@ -476,6 +476,7 @@ function renderTable(){
   }).join('')+'</tr>').join('')
     || `<tr><td colspan="${c.length||1}" class="muted" style="padding:20px">No data</td></tr>`;
   document.getElementById('stTotal').textContent=rows.length;
+  document.getElementById('stShown').textContent=data.length;
 }
 function setSort(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k;sortDir=1;} renderTable(); }
 document.getElementById('search').addEventListener('input',renderTable);
@@ -796,13 +797,28 @@ function drawTable(theadId,tbodyId,rowsArr){
 function stripWelcome(rowsArr){
   return (rowsArr||[]).map(r=>{const c=Object.assign({},r);delete c['Welcome SMS'];return c;});
 }
+const REPORT_COLS=['Username','User ID','Today','Yesterday','Last 7 Day','Last 30 Day','Last 12 Months','Duplicates'];
 async function loadReportSheet(){
   const hint=document.getElementById('rpShHint');
   if(!cfg.report){ hint.textContent='Set the report webhook URL in Settings first.'; return; }
   hint.textContent='loading…';
   try{
     const data=await sheetsFetch({sheet:'Report',doc:'tracker'});
-    drawTable('rpThead','rpTbody',stripWelcome(data.rows));
+    const rows=stripWelcome(data.rows);
+    const keys=[...new Set(rows.flatMap(r=>Object.keys(r)))];
+    const byTrim={}; keys.forEach(k=>{const t=k.trim().toLowerCase(); if(!(t in byTrim)) byTrim[t]=k;});
+    const ordered=REPORT_COLS.map(c=>byTrim[c.toLowerCase()]).filter(Boolean);
+    const cols=ordered.concat(keys.filter(k=>!ordered.includes(k)));
+    // Строка "all" из листа считает итоги сама — закрепляем её под шапкой
+    const firstCol=cols[0];
+    const allIdx=rows.findIndex(r=>String(r[firstCol]??'').trim().toLowerCase()==='all');
+    const allRow=allIdx>=0?rows.splice(allIdx,1)[0]:null;
+    document.getElementById('rpThead').innerHTML=
+      '<tr>'+cols.map(k=>`<th>${esc(k.trim())}</th>`).join('')+'</tr>'
+      +(allRow?'<tr class="pin2">'+cols.map(k=>`<th>${esc(allRow[k]??'')}</th>`).join('')+'</tr>':'');
+    document.getElementById('rpTbody').innerHTML=
+      rows.map(r=>'<tr>'+cols.map(k=>`<td title="${esc(r[k]??'')}">${esc(r[k]??'')}</td>`).join('')+'</tr>').join('')
+      ||`<tr><td colspan="${cols.length||1}" class="muted" style="padding:16px">No data</td></tr>`;
     hint.textContent='showing '+(data.count||0)+' of '+(data.total||0)+' rows'+(data.notice?' · '+data.notice:'');
   }catch(e){ hint.textContent='error: '+e.message+' (does the «Report» tab exist in the sheet?)'; }
 }
@@ -988,5 +1004,8 @@ async function submitPaste(){
 document.getElementById('dFrom').value=todayNY();
 document.getElementById('dTo').value=todayNY();
 fillCfg(); updateMode(); loadReport();
+// Вкладка Settings скрыта из навигации: открывается по адресу …/#settings
+// или сама — на устройстве, где вебхуки ещё не настроены
+if(location.hash.replace('#','')==='settings'||(!cfg.report&&!cfg.create)) showTab('settings');
 </script>
 </body></html>
