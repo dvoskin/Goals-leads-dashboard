@@ -112,10 +112,6 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
   </div>
   <div class="card">
     <div class="toolbar">
-      <div class="seg" id="viewSeg">
-        <button data-view="all" class="active">All recent</button>
-        <button data-view="calls">Calls for date</button>
-      </div>
       <input type="date" id="dFrom" style="max-width:160px" title="From (NY date)">
       <input type="date" id="dTo" style="max-width:160px" title="To (NY date)">
       <button class="btn ghost" onclick="setCallsToday()">Today</button>
@@ -135,7 +131,7 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
       <table id="tbl"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table>
     </div>
     <div class="note" id="reportNote">Showing demo data. Set the report webhook URL in Settings to pull real leads from n8n / Zoho.</div>
-    <p class="muted" style="font-size:12.5px;margin:8px 0 0"><b>All recent</b> — every lead created in the selected day(s) (New York dates). <b>Calls for date</b> — leads whose scheduled call falls on the selected day(s) plus CALL NOW leads created that day. <span style="background:#123f28;padding:1px 8px;border-radius:6px">Green rows</span> = call within the next hour (or CALL NOW).</p>
+    <p class="muted" style="font-size:12.5px;margin:8px 0 0">The list shows every lead created in the selected day(s) (New York dates). <span style="background:#123f28;padding:1px 8px;border-radius:6px">Green rows</span> = call within the next hour (or CALL NOW).</p>
   </div>
 </section>
 
@@ -359,7 +355,6 @@ const demo=[
 ];
 let rows=demo.slice();
 let sortKey=null,sortDir=1;
-let viewMode='all';
 
 // ---------- helpers ----------
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -408,7 +403,7 @@ async function loadReport(){
     const f=document.getElementById('dFrom').value||todayNY();
     const t=document.getElementById('dTo').value||f;
     u.searchParams.set('calls_from',f); u.searchParams.set('calls_to',t);
-    if(viewMode==='all') u.searchParams.set('calls_filter','created');
+    u.searchParams.set('calls_filter','created');
     const lbl=document.getElementById('navLeadsLabel');
     lbl.textContent='Add + Leads · '+(f===t?(f===todayNY()?'today · '+f:f):f+' → '+t);
     const r=await fetch(u,{headers:apiHeaders()});
@@ -486,11 +481,6 @@ function setSort(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k;sortDir=1;} re
 document.getElementById('search').addEventListener('input',renderTable);
 document.getElementById('fltMins').addEventListener('input',renderTable);
 ['fltSource','fltStage','fltChannel'].forEach(id=>document.getElementById(id).addEventListener('change',renderTable));
-document.querySelectorAll('#viewSeg button').forEach(b=>b.onclick=()=>{
-  document.querySelectorAll('#viewSeg button').forEach(x=>x.classList.remove('active'));
-  b.classList.add('active'); viewMode=b.dataset.view;
-  if(cfg.report) loadReport(); else renderTable();
-});
 function setCallsToday(){
   document.getElementById('dFrom').value=todayNY();
   document.getElementById('dTo').value=todayNY();

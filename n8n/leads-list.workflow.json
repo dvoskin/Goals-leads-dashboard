@@ -913,7 +913,7 @@
                 ]
               },
               "paginationCompleteWhen": "other",
-              "completeExpression": "={{ !$response.body.data || $response.body.data.length < 200 || $response.body.data[$response.body.data.length - 1].Modified_Time < $('Build Stats Query').item.json.fromISO }}",
+              "completeExpression": "={{ !$response.body.data || $response.body.data.length < 200 || $response.body.data[$response.body.data.length - 1].Modified_Time < $('Build Stats Query').first().json.fromISO }}",
               "limitPagesFetched": true,
               "maxRequests": 15,
               "requestInterval": 120
@@ -1043,7 +1043,7 @@
                 ]
               },
               "paginationCompleteWhen": "other",
-              "completeExpression": "={{ !$response.body.data || $response.body.data.length < 200 || $response.body.data[$response.body.data.length - 1].Modified_Time < $('Build Calls Query').item.json.floorISO }}",
+              "completeExpression": "={{ !$response.body.data || $response.body.data.length < 200 || $response.body.data[$response.body.data.length - 1].Modified_Time < $('Build Calls Query').first().json.floorISO }}",
               "limitPagesFetched": true,
               "maxRequests": 15,
               "requestInterval": 120
