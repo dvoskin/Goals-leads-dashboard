@@ -126,7 +126,7 @@ code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1224;paddin
     </div>
     <div class="toolbar" style="margin-top:-4px">
       <input id="fltMins" type="number" min="1" max="720" placeholder="⏱ minutes" inputmode="numeric" style="max-width:130px">
-      <span class="muted" style="font-size:12.5px;flex:1 1 260px">⏱ Call-in-N-minutes filter: type a number of minutes (e.g. <b>10</b>, <b>35</b>, <b>60</b>) to see everyone who should be called now — CALL NOW leads, overdue calls (call time already passed) and calls due within the next N minutes (ET / New York), sorted in calling order. Clear the box to show all.</span>
+      <span class="muted" style="font-size:12.5px;flex:1 1 260px">⏱ Call-in-N-minutes filter: type a number of minutes (e.g. <b>10</b>, <b>35</b>, <b>60</b>) to show only CALL NOW leads and calls due within the next N minutes (ET / New York), sorted in calling order. Past call times are hidden. Clear the box to show all.</span>
     </div>
     <div class="tablewrap">
       <table id="tbl"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table>
@@ -483,12 +483,11 @@ function filteredRows(){
     if(fc==='dash'&&!r.via_dashboard) return false;
     if(fc==='other'&&r.via_dashboard) return false;
     if(useMins){
-      // Показываем всех, кого пора набирать: CALL NOW, просроченные
-      // (время звонка уже прошло) и звонки в ближайшие N минут
+      // CALL NOW + звонки в ближайшие N минут; прошедшее время не показываем
       if(r.call_now===true) return true;
       const t=callTs(r);
       if(isNaN(t)) return false;
-      if(t>now+mins*60e3) return false;
+      if(t<now||t>now+mins*60e3) return false;
     }
     return true;
   });
@@ -1034,7 +1033,8 @@ async function submitPaste(){
     if(!r.ok||!data||data.ok!==true) throw new Error((data&&data.error)||('HTTP '+r.status));
     m.className='msg ok';
     m.textContent='✓ Created: '+(data.name||'—')+' · '+(data.phone||'')+' · '+(data.best_contact_time||'')
-      +(data.duplicate?' · duplicate found, deal updated':'')+(data.id?' · Deal ID: '+data.id:'');
+      +(data.duplicate?' · duplicate found, deal updated':'')+(data.id?' · Deal ID: '+data.id:'')
+      +(data.journal_error?' · ⚠ Sheet journal failed: '+data.journal_error:'');
     document.getElementById('pasteText').value=''; clearPastePhoto(); loadReport();
   }catch(err){ m.className='msg err'; m.textContent='Error: '+err.message+' (check webhook URL, token and CORS).'; }
   finally{ btn.disabled=false; btn.textContent='Parse & Create in Zoho'; }

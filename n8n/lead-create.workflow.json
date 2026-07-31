@@ -752,6 +752,35 @@
       }
     },
     {
+      "name": "Sheets: Ensure Tab",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        2530,
+        -220
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "resource": "sheet",
+        "operation": "create",
+        "documentId": {
+          "__rl": true,
+          "value": "10Yr6hkRJK2C6PCvQ1P_t5s1VUls-LZi-1xi8N4j91Z8",
+          "mode": "list",
+          "cachedResultName": "DEAL CREATOR CHAT TRACKER",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/10Yr6hkRJK2C6PCvQ1P_t5s1VUls-LZi-1xi8N4j91Z8/edit?usp=drivesdk"
+        },
+        "title": "Dashboard Leads",
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "HWi3hgVZ1OjoFkBZ",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
       "name": "Sheets: Append Journal",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
@@ -777,22 +806,22 @@
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
-            "Added": "={{ $json['Added'] }}",
-            "First Name": "={{ $json['First Name'] }}",
-            "Last Name": "={{ $json['Last Name'] }}",
-            "Phone": "={{ $json['Phone'] }}",
-            "Email": "={{ $json['Email'] }}",
-            "City": "={{ $json['City'] }}",
-            "ZIP": "={{ $json['ZIP'] }}",
-            "Contact Time": "={{ $json['Contact Time'] }}",
-            "Best Contact Time": "={{ $json['Best Contact Time'] }}",
-            "Source": "={{ $json['Source'] }}",
-            "Interest": "={{ $json['Interest'] }}",
-            "Notes": "={{ $json['Notes'] }}",
-            "Status": "={{ $json['Status'] }}",
-            "Deal Stage": "={{ $json['Deal Stage'] }}",
-            "Deal ID": "={{ $json['Deal ID'] }}",
-            "Contact ID": "={{ $json['Contact ID'] }}"
+            "Added": "={{ $('Prepare Log Row').first().json['Added'] }}",
+            "First Name": "={{ $('Prepare Log Row').first().json['First Name'] }}",
+            "Last Name": "={{ $('Prepare Log Row').first().json['Last Name'] }}",
+            "Phone": "={{ $('Prepare Log Row').first().json['Phone'] }}",
+            "Email": "={{ $('Prepare Log Row').first().json['Email'] }}",
+            "City": "={{ $('Prepare Log Row').first().json['City'] }}",
+            "ZIP": "={{ $('Prepare Log Row').first().json['ZIP'] }}",
+            "Contact Time": "={{ $('Prepare Log Row').first().json['Contact Time'] }}",
+            "Best Contact Time": "={{ $('Prepare Log Row').first().json['Best Contact Time'] }}",
+            "Source": "={{ $('Prepare Log Row').first().json['Source'] }}",
+            "Interest": "={{ $('Prepare Log Row').first().json['Interest'] }}",
+            "Notes": "={{ $('Prepare Log Row').first().json['Notes'] }}",
+            "Status": "={{ $('Prepare Log Row').first().json['Status'] }}",
+            "Deal Stage": "={{ $('Prepare Log Row').first().json['Deal Stage'] }}",
+            "Deal ID": "={{ $('Prepare Log Row').first().json['Deal ID'] }}",
+            "Contact ID": "={{ $('Prepare Log Row').first().json['Contact ID'] }}"
           },
           "matchingColumns": [],
           "schema": []
@@ -816,7 +845,7 @@
       ],
       "parameters": {
         "respondWith": "text",
-        "responseBody": "={{ JSON.stringify({ ok: true, id: $('Prepare Log Row').first().json['Deal ID'] || null, contact_id: $('Prepare Log Row').first().json['Contact ID'] || null, duplicate: $('Deal Decision').first().json.isDuplicate === true, stage: $('Deal Decision').first().json.dealData.Stage, name: $('Validate & Normalize').first().json.fullName || '', phone: $('Validate & Normalize').first().json.phone || '', best_contact_time: $('Validate & Normalize').first().json.bestContactTime || '' }) }}",
+        "responseBody": "={{ JSON.stringify({ ok: true, id: $('Prepare Log Row').first().json['Deal ID'] || null, contact_id: $('Prepare Log Row').first().json['Contact ID'] || null, duplicate: $('Deal Decision').first().json.isDuplicate === true, stage: $('Deal Decision').first().json.dealData.Stage, name: $('Validate & Normalize').first().json.fullName || '', phone: $('Validate & Normalize').first().json.phone || '', best_contact_time: $('Validate & Normalize').first().json.bestContactTime || '', journal_error: ($json.error ? String($json.error.message || $json.error.description || JSON.stringify($json.error)).slice(0, 200) : null) }) }}",
         "options": {
           "responseCode": 200,
           "responseHeaders": {
@@ -1172,6 +1201,17 @@
       ]
     },
     "Prepare Log Row": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Ensure Tab",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Ensure Tab": {
       "main": [
         [
           {
