@@ -740,6 +740,35 @@
       }
     },
     {
+      "name": "Sheets: Fix Header",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2450,
+        -260
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "PUT",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/10Yr6hkRJK2C6PCvQ1P_t5s1VUls-LZi-1xi8N4j91Z8/values/Dashboard%20Leads!A1%3AQ1?valueInputOption=RAW",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"values\":[[\"Added\",\"First Name\",\"Last Name\",\"Phone\",\"Email\",\"City\",\"ZIP\",\"Contact Time\",\"Best Contact Time\",\"Source\",\"Interest\",\"Notes\",\"Status\",\"Deal Stage\",\"Deal ID\",\"Contact ID\",\"Manager\"]]}",
+        "options": {
+          "timeout": 20000
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "HWi3hgVZ1OjoFkBZ",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
       "name": "Prepare Log Row",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1486,6 +1515,17 @@
       ]
     },
     "Sheets: Ensure Tab": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Fix Header",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Fix Header": {
       "main": [
         [
           {
